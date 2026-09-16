@@ -1,0 +1,18 @@
+{
+  "short_name": "Gelato V2",
+  "name": "Gelato Manager V2 - Sistema de Gestão & PDV Touchscreen",
+  "description": "Sistema touchscreen-first para sorveterias por quilo, gelaterias, açaí e balcão.",
+  "start_url": "/pos",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#10b981",
+  "background_color": "#0d1b14",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}
