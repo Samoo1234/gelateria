@@ -51,8 +51,28 @@ export const orderService = {
    * O cálculo e a validação de preços são 100% seguros e processados no servidor.
    */
   async finalizeSale(payload: FinalizeSalePayload): Promise<FinalizeSaleResult> {
+    // Normaliza os métodos de pagamento para o formato do CHECK constraint do banco
+    const methodMap: Record<string, string> = {
+      'money': 'DINHEIRO',
+      'pix': 'PIX',
+      'debit_card': 'CARTAO_DEBITO',
+      'credit_card': 'CARTAO_CREDITO',
+      'DINHEIRO': 'DINHEIRO',
+      'PIX': 'PIX',
+      'CARTAO_DEBITO': 'CARTAO_DEBITO',
+      'CARTAO_CREDITO': 'CARTAO_CREDITO'
+    };
+
+    const normalizedPayload = {
+      ...payload,
+      payments: payload.payments.map(p => ({
+        ...p,
+        payment_method: methodMap[p.payment_method] || 'DINHEIRO'
+      }))
+    };
+
     const { data, error } = await supabase.rpc('finalize_sale', {
-      p_sale_payload: payload as any,
+      p_sale_payload: normalizedPayload as any,
     });
 
     if (error) {

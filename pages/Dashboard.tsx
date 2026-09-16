@@ -1,171 +1,320 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
-import { HOURLY_SALES, TOP_PRODUCTS } from '../constants';
+import { 
+  reportService, 
+  DashboardSummary, 
+  TopProductMetric, 
+  RecentOrderSummary,
+  PaymentBreakdown
+} from '../services/reportService';
+import { 
+  DollarSign, 
+  ShoppingBag, 
+  TrendingUp, 
+  Award, 
+  RefreshCw, 
+  ArrowUpRight, 
+  Calendar, 
+  Clock, 
+  CreditCard,
+  QrCode,
+  Banknote,
+  IceCream
+} from 'lucide-react';
+import { NavLink } from 'react-router-dom';
 
 const Dashboard: React.FC = () => {
+  const [summary, setSummary] = useState<DashboardSummary>({
+    todaySalesTotal: 0,
+    todayOrdersCount: 0,
+    averageTicket: 0,
+    totalProductsSold: 0,
+    monthSalesTotal: 0
+  });
+  const [topProducts, setTopProducts] = useState<TopProductMetric[]>([]);
+  const [recentOrders, setRecentOrders] = useState<RecentOrderSummary[]>([]);
+  const [payments, setPayments] = useState<PaymentBreakdown[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const loadDashboardData = async () => {
+    try {
+      setIsLoading(true);
+      const [sum, top, recent, pay] = await Promise.all([
+        reportService.getDashboardSummary(),
+        reportService.getTopSellingProducts(5),
+        reportService.getRecentOrders(6),
+        reportService.getPaymentBreakdown()
+      ]);
+
+      setSummary(sum);
+      setTopProducts(top);
+      setRecentOrders(recent);
+      setPayments(pay);
+    } catch (err) {
+      console.error('Erro ao carregar métricas do dashboard:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
   return (
     <Layout>
-      <div className="p-6 lg:p-10 h-full overflow-y-auto">
-        <div className="mx-auto max-w-7xl">
-          {/* Header */}
-          <header className="flex flex-wrap items-center justify-between gap-6 mb-10 transition-all duration-500">
-            <div className="flex min-w-72 flex-col gap-2">
-              <h1 className="text-4xl md:text-5xl font-black leading-tight tracking-tight text-gray-900 dark:text-white font-display">Dashboard</h1>
-              <p className="text-lg font-normal leading-normal text-gray-500 dark:text-gray-400 font-body">Visão geral das vendas e operações de hoje.</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <button className="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-gradient-to-r from-primary to-secondary text-white shadow-md hover:shadow-lg transition-all duration-300 ease-fluid hover:-translate-y-1 px-5">
-                <p className="text-sm font-bold leading-normal tracking-wide">Hoje</p>
-              </button>
-              <button className="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-white/60 dark:bg-surface-dark/60 backdrop-blur-md px-5 border border-gray-200/50 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/20 hover:border-gray-300 dark:hover:border-white/30 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow-md transition-all duration-300 ease-fluid">
-                <p className="text-sm font-semibold leading-normal">Ontem</p>
-              </button>
-              <button className="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-white/60 dark:bg-surface-dark/60 backdrop-blur-md px-5 border border-gray-200/50 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/20 hover:border-gray-300 dark:hover:border-white/30 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow-md transition-all duration-300 ease-fluid">
-                <p className="text-sm font-semibold leading-normal">Últimos 7 dias</p>
-              </button>
-              <button className="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-white/60 dark:bg-surface-dark/60 backdrop-blur-md px-5 border border-gray-200/50 dark:border-white/10 hover:bg-white/90 dark:hover:bg-white/20 hover:border-gray-300 dark:hover:border-white/30 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow-md transition-all duration-300 ease-fluid">
-                <span className="material-symbols-outlined text-base">calendar_month</span>
-                <p className="text-sm font-semibold leading-normal">Este Mês</p>
-                <span className="material-symbols-outlined text-lg">expand_more</span>
-              </button>
-            </div>
-          </header>
+      <div className="p-6 md:p-8 h-full space-y-8 max-w-7xl mx-auto overflow-y-auto">
+        
+        {/* Header */}
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-black text-gray-900 dark:text-white tracking-tight">
+              Dashboard de Vendas
+            </h1>
+            <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
+              Métricas consolidadas em tempo real do quiosque e balcão da sorveteria.
+            </p>
+          </div>
 
-          {/* Stats Cards - Liquid Glass staggered pattern */}
-          <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-            {[
-              { title: 'Vendas Totais', value: 'R$ 1.250,50', change: '+5.2%', isPositive: true },
-              { title: 'Total de Pedidos', value: '83', change: '+8.1%', isPositive: true },
-              { title: 'Ticket Médio', value: 'R$ 15,07', change: '-1.5%', isPositive: false },
-              { title: 'Produtos Vendidos', value: '152', change: '+12%', isPositive: true },
-            ].map((stat, i) => (
-              <div
-                key={i}
-                className="group relative flex flex-col gap-3 rounded-3xl p-6 bg-white/70 dark:bg-surface-dark/70 backdrop-blur-xl border border-white/40 dark:border-white/10 shadow-glass hover:shadow-glass-hover transition-all duration-500 ease-fluid hover:-translate-y-2 overflow-hidden"
-                style={{ transitionDelay: `${i * 50}ms` }}
-              >
-                {/* Decorative background glow on hover */}
-                <div className="absolute -inset-4 bg-gradient-to-br from-primary/5 to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10 rounded-3xl blur-xl"></div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={loadDashboardData}
+              className="flex items-center gap-2 px-4 h-11 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-surface-dark hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-bold transition-all shadow-sm cursor-pointer active:scale-95"
+            >
+              <RefreshCw className={`size-4 ${isLoading ? 'animate-spin text-primary' : ''}`} />
+              <span>Atualizar</span>
+            </button>
 
-                <p className="text-sm font-semibold leading-normal text-gray-500 dark:text-gray-400 font-body tracking-wide uppercase">{stat.title}</p>
-                <p className="tracking-tight text-4xl font-black leading-tight text-gray-900 dark:text-white font-display my-1">{stat.value}</p>
-                <div className="flex items-center gap-1.5 mt-auto">
-                  <span className={`flex items-center justify-center p-1 rounded-full ${stat.isPositive ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'}`}>
-                    <span className="material-symbols-outlined text-[14px]">
-                      {stat.isPositive ? 'trending_up' : 'trending_down'}
-                    </span>
-                  </span>
-                  <p className={`text-sm font-bold leading-normal ${stat.isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {stat.change}
-                  </p>
-                </div>
+            <NavLink
+              to="/pos"
+              className="flex items-center gap-2 px-5 h-11 rounded-xl bg-primary text-[#0d1b14] hover:bg-opacity-90 font-black text-sm transition-all shadow-md active:scale-95"
+            >
+              <ShoppingBag className="size-4" />
+              <span>Abrir PDV Touch</span>
+            </NavLink>
+          </div>
+        </header>
+
+        {/* Stats Cards Reais */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+          {/* Vendas Hoje */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Vendas Hoje</span>
+              <div className="p-2 rounded-xl bg-primary/20 text-primary">
+                <DollarSign className="size-5" />
               </div>
-            ))}
-          </section>
+            </div>
+            <div className="mt-4">
+              <span className="text-3xl md:text-4xl font-black text-gray-900 dark:text-white">
+                R$ {summary.todaySalesTotal.toFixed(2).replace('.', ',')}
+              </span>
+              <p className="text-xs text-green-600 dark:text-green-400 font-bold mt-1 flex items-center gap-1">
+                <ArrowUpRight className="size-3.5" />
+                <span>Atualizado em tempo real</span>
+              </p>
+            </div>
+          </div>
 
-          {/* Charts Section */}
-          <section className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-            {/* Sales Chart */}
-            <div className="xl:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="flex w-full flex-col gap-6 rounded-3xl border border-white/40 dark:border-white/10 p-8 bg-white/70 dark:bg-surface-dark/70 backdrop-blur-xl shadow-glass transition-all duration-500 hover:shadow-glass-hover group">
-                <div className="flex justify-between items-center">
-                  <p className="text-xl font-bold leading-normal text-gray-900 dark:text-gray-50 font-display tracking-tight">Vendas por Hora</p>
-                  <span className="material-symbols-outlined text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">bar_chart</span>
-                </div>
-                <div className="h-[240px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={HOURLY_SALES} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <XAxis dataKey="time" tick={{ fill: '#9ca3af', fontSize: 13, fontFamily: 'Nunito Sans' }} axisLine={false} tickLine={false} dy={10} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', color: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}
-                        itemStyle={{ color: '#fff', fontWeight: 600, fontFamily: 'Nunito Sans' }}
-                        cursor={{ fill: 'rgba(59, 130, 246, 0.05)', radius: [8, 8, 8, 8] }}
-                      />
-                      <Bar dataKey="sales" fill="url(#colorPrimary)" radius={[6, 6, 6, 6]} barSize={32} />
-                      <defs>
-                        <linearGradient id="colorPrimary" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#60A5FA" stopOpacity={1} />
-                          <stop offset="100%" stopColor="#3B82F6" stopOpacity={0.8} />
-                        </linearGradient>
-                      </defs>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+          {/* Pedidos Atendidos */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Pedidos Hoje</span>
+              <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300">
+                <ShoppingBag className="size-5" />
               </div>
+            </div>
+            <div className="mt-4">
+              <span className="text-3xl md:text-4xl font-black text-gray-900 dark:text-white">
+                {summary.todayOrdersCount}
+              </span>
+              <p className="text-xs text-gray-400 mt-1">
+                Atendimentos concluídos
+              </p>
+            </div>
+          </div>
 
-              {/* Top Products */}
-              <div className="flex w-full flex-col gap-6 rounded-3xl border border-white/40 dark:border-white/10 p-8 bg-white/70 dark:bg-surface-dark/70 backdrop-blur-xl shadow-glass transition-all duration-500 hover:shadow-glass-hover group">
-                <div className="flex justify-between items-center">
-                  <p className="text-xl font-bold leading-normal text-gray-900 dark:text-gray-50 font-display tracking-tight">Top Produtos</p>
-                  <span className="material-symbols-outlined text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">shopping_cart</span>
-                </div>
-                <div className="flex flex-col justify-between h-full gap-4 pt-2">
-                  {TOP_PRODUCTS.map((product, idx) => (
-                    <div key={idx} className="grid gap-x-4 gap-y-2 grid-cols-[auto_1fr_auto] items-center hover:bg-gray-50/50 dark:hover:bg-white/5 p-2 -mx-2 rounded-xl transition-colors">
-                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 w-28 truncate">{product.name}</p>
-                      <div className="h-3 rounded-full bg-gray-100 dark:bg-gray-800/50 flex-1 my-auto overflow-hidden border border-gray-200/50 dark:border-white/5">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-primary to-secondary"
-                          style={{ width: `${(product.sales / 100) * 100}%` }}
-                        ></div>
+          {/* Ticket Médio */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Ticket Médio</span>
+              <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-300">
+                <TrendingUp className="size-5" />
+              </div>
+            </div>
+            <div className="mt-4">
+              <span className="text-3xl md:text-4xl font-black text-gray-900 dark:text-white">
+                R$ {summary.averageTicket.toFixed(2).replace('.', ',')}
+              </span>
+              <p className="text-xs text-gray-400 mt-1">
+                Média por consumidor
+              </p>
+            </div>
+          </div>
+
+          {/* Vendas do Mês */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Total no Mês</span>
+              <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300">
+                <Calendar className="size-5" />
+              </div>
+            </div>
+            <div className="mt-4">
+              <span className="text-3xl md:text-4xl font-black text-gray-900 dark:text-white">
+                R$ {summary.monthSalesTotal.toFixed(2).replace('.', ',')}
+              </span>
+              <p className="text-xs text-gray-400 mt-1">
+                Faturamento acumulado
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Grid Intermediário: Top Produtos & Formas de Pagamento */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Top Produtos / Sabores Mais Vendidos */}
+          <div className="lg:col-span-2 p-6 rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-800 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Award className="size-5 text-primary" />
+                <h3 className="font-bold text-lg text-gray-900 dark:text-white">
+                  Produtos & Sabores Campeões de Venda
+                </h3>
+              </div>
+              <span className="text-xs font-bold text-gray-400">Por volume</span>
+            </div>
+
+            {topProducts.length === 0 ? (
+              <div className="py-12 text-center text-gray-400 text-sm">
+                Nenhum produto vendido no período selecionado.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {topProducts.map((p, idx) => (
+                  <div key={p.id} className="flex items-center justify-between p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-3">
+                      <span className="size-8 rounded-xl bg-primary/20 text-primary font-black text-xs flex items-center justify-center">
+                        #{idx + 1}
+                      </span>
+                      <div>
+                        <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                          {p.name}
+                        </h4>
+                        <span className="text-xs text-gray-400">
+                          {p.totalQuantity} {p.totalQuantity > 1 ? 'unidades/bolas vendidas' : 'unidade vendida'}
+                        </span>
                       </div>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 w-8 text-right">{product.sales}</p>
+                    </div>
+                    <span className="font-black text-sm text-primary">
+                      R$ {p.totalRevenue.toFixed(2).replace('.', ',')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Formas de Pagamento */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+            <div>
+              <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-4">
+                Formas de Pagamento
+              </h3>
+              
+              {payments.length === 0 ? (
+                <div className="py-12 text-center text-gray-400 text-sm">
+                  Nenhum pagamento registrado.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {payments.map(pay => (
+                    <div key={pay.method} className="p-3 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/20">
+                      <div className="flex justify-between items-center text-sm font-bold mb-1">
+                        <span className="text-gray-700 dark:text-gray-300">{pay.method}</span>
+                        <span className="text-gray-900 dark:text-white">
+                          R$ {pay.totalAmount.toFixed(2).replace('.', ',')}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-gray-400">
+                        <span>{pay.count} transações</span>
+                        <span className="font-extrabold text-primary">{pay.percentage}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div className="bg-primary h-full rounded-full" style={{ width: `${pay.percentage}%` }}></div>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
+              )}
             </div>
 
-            {/* Stock Alert Table - Soft styling */}
-            <div className="xl:col-span-1 flex flex-col gap-6 rounded-3xl border border-white/40 dark:border-white/10 p-8 bg-white/70 dark:bg-surface-dark/70 backdrop-blur-xl shadow-glass transition-all duration-500 hover:shadow-glass-hover">
-              <div className="flex justify-between items-center border-b border-gray-100 dark:border-white/10 pb-4">
-                <h3 className="text-xl font-bold leading-normal text-gray-900 dark:text-gray-50 font-display tracking-tight">Estoque Baixo</h3>
-                <span className="material-symbols-outlined text-cta animate-pulse">warning</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="text-xs uppercase font-bold tracking-wider text-gray-400 dark:text-gray-500">
-                    <tr>
-                      <th className="py-3 px-2">Ingrediente</th>
-                      <th className="py-3 px-2 text-center">Qtd.</th>
-                      <th className="py-3 pl-2 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-white/5">
-                    <tr className="group hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors">
-                      <td className="py-4 px-2 text-sm font-bold text-gray-800 dark:text-gray-200">Leite Condensado</td>
-                      <td className="py-4 px-2 text-sm font-medium text-gray-500 dark:text-gray-400 text-center">2 L</td>
-                      <td className="py-4 pl-2 text-right flex justify-end">
-                        <span className="inline-flex items-center gap-2 rounded-full bg-red-50 dark:bg-red-900/20 px-3 py-1 text-xs font-bold text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30">
-                          <span className="size-2 rounded-full bg-red-500 animate-pulse"></span> Crítico
-                        </span>
-                      </td>
-                    </tr>
-                    <tr className="group hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors">
-                      <td className="py-4 px-2 text-sm font-bold text-gray-800 dark:text-gray-200">Polpa de Morango</td>
-                      <td className="py-4 px-2 text-sm font-medium text-gray-500 dark:text-gray-400 text-center">5 Kg</td>
-                      <td className="py-4 pl-2 text-right flex justify-end">
-                        <span className="inline-flex items-center gap-2 rounded-full bg-yellow-50 dark:bg-yellow-900/20 px-3 py-1 text-xs font-bold text-yellow-700 dark:text-yellow-400 border border-yellow-100 dark:border-yellow-900/30">
-                          <span className="size-2 rounded-full bg-yellow-500"></span> Atenção
-                        </span>
-                      </td>
-                    </tr>
-                    <tr className="group hover:bg-gray-50/50 dark:hover:bg-white/5 transition-colors">
-                      <td className="py-4 px-2 text-sm font-bold text-gray-800 dark:text-gray-200">Granulado</td>
-                      <td className="py-4 px-2 text-sm font-medium text-gray-500 dark:text-gray-400 text-center">1 Kg</td>
-                      <td className="py-4 pl-2 text-right flex justify-end">
-                        <span className="inline-flex items-center gap-2 rounded-full bg-red-50 dark:bg-red-900/20 px-3 py-1 text-xs font-bold text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30">
-                          <span className="size-2 rounded-full bg-red-500 animate-pulse"></span> Crítico
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
+            <NavLink
+              to="/reports"
+              className="mt-6 text-xs font-bold text-primary hover:underline text-center block"
+            >
+              Ver relatórios financeiros detalhados →
+            </NavLink>
+          </div>
+
         </div>
+
+        {/* Últimos Pedidos */}
+        <section className="p-6 rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-800 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-lg text-gray-900 dark:text-white">
+              Últimos Pedidos Finalizados
+            </h3>
+            <span className="text-xs text-gray-400">Tempo real</span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs font-bold text-gray-400 uppercase border-b border-gray-100 dark:border-gray-800">
+                <tr>
+                  <th className="py-3 px-4">Pedido</th>
+                  <th className="py-3 px-4">Data / Hora</th>
+                  <th className="py-3 px-4">Operador</th>
+                  <th className="py-3 px-4">Terminal</th>
+                  <th className="py-3 px-4 text-right">Valor Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 font-medium">
+                {recentOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-gray-400">
+                      Nenhum pedido finalizado hoje. Abra o PDV para realizar a primeira venda!
+                    </td>
+                  </tr>
+                ) : (
+                  recentOrders.map(o => (
+                    <tr key={o.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
+                      <td className="py-3 px-4 font-black text-gray-900 dark:text-white">
+                        {o.orderNumber}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-gray-500">
+                        {new Date(o.orderDate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 dark:text-gray-300">
+                        {o.employeeName}
+                      </td>
+                      <td className="py-3 px-4 text-xs">
+                        <span className="px-2 py-0.5 rounded bg-primary/20 text-primary font-bold">
+                          {o.terminalCode}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-black text-primary">
+                        R$ {o.total.toFixed(2).replace('.', ',')}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
       </div>
     </Layout>
   );
