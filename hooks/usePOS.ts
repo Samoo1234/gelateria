@@ -8,6 +8,10 @@ import {
   PaymentPayload,
   FinalizeSaleResult 
 } from '../services/orderService';
+import { 
+  cashRegisterService, 
+  CashRegisterSessionRow 
+} from '../services/cashRegisterService';
 
 export interface CartItemUI {
   id: string; // client temporary ID
@@ -40,8 +44,23 @@ export function usePOS() {
   const [isProcessingSale, setIsProcessingSale] = useState(false);
   const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
   const [activeCashierId, setActiveCashierId] = useState<string | null>(null);
+  const [activeSession, setActiveSession] = useState<CashRegisterSessionRow | null>(null);
   const [lastSaleResult, setLastSaleResult] = useState<FinalizeSaleResult | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+
+  // Carregar sessão ativa de caixa para o terminal
+  const checkActiveSession = useCallback(async (terminalId: string | null) => {
+    if (!terminalId) {
+      setActiveSession(null);
+      return;
+    }
+    try {
+      const session = await cashRegisterService.getCurrentSession(terminalId);
+      setActiveSession(session);
+    } catch (err) {
+      console.error('Erro ao verificar sessão de caixa:', err);
+    }
+  }, []);
 
   // Carregar catálogo inicial
   const loadCatalog = useCallback(async () => {
@@ -65,6 +84,9 @@ export function usePOS() {
       }
       if (terminals.length > 0 && !activeTerminalId) {
         setActiveTerminalId(terminals[0].id);
+        checkActiveSession(terminals[0].id);
+      } else if (activeTerminalId) {
+        checkActiveSession(activeTerminalId);
       }
       if (cashiers.length > 0 && !activeCashierId) {
         setActiveCashierId(cashiers[0].id);
@@ -75,11 +97,17 @@ export function usePOS() {
     } finally {
       setIsLoadingCatalog(false);
     }
-  }, [activeCategoryId, activeTerminalId, activeCashierId]);
+  }, [activeCategoryId, activeTerminalId, activeCashierId, checkActiveSession]);
 
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
+
+  useEffect(() => {
+    if (activeTerminalId) {
+      checkActiveSession(activeTerminalId);
+    }
+  }, [activeTerminalId, checkActiveSession]);
 
   // Sabores disponíveis (is_flavor = true)
   const availableFlavors = useMemo(() => {
@@ -264,7 +292,7 @@ export function usePOS() {
       }));
 
       const payload = {
-        session_id: null, // Será integrado na sessão de caixa no Sprint 5
+        session_id: activeSession?.id || null,
         terminal_id: activeTerminalId,
         employee_id: activeCashierId,
         customer_id: null,
@@ -284,7 +312,7 @@ export function usePOS() {
     } finally {
       setIsProcessingSale(false);
     }
-  }, [cart, discount, activeTerminalId, activeCashierId]);
+  }, [cart, discount, activeTerminalId, activeCashierId, activeSession]);
 
   return {
     categories,
@@ -317,6 +345,8 @@ export function usePOS() {
     setActiveTerminalId,
     activeCashierId,
     setActiveCashierId,
+    activeSession,
+    refreshSession: () => checkActiveSession(activeTerminalId),
     lastSaleResult,
     refreshCatalog: loadCatalog,
   };

@@ -5,6 +5,7 @@ import { ProductRow } from '../services/orderService';
 import { ScoopSelectionModal } from '../components/ScoopSelectionModal';
 import { WeightSelectionModal } from '../components/WeightSelectionModal';
 import { CheckoutModal } from '../components/CheckoutModal';
+import { CashRegisterModal } from '../components/CashRegisterModal';
 import { 
   Search, 
   Trash2, 
@@ -44,6 +45,10 @@ const NewOrder: React.FC = () => {
     isLoadingCatalog,
     isProcessingSale,
     catalogError,
+    activeTerminalId,
+    activeCashierId,
+    activeSession,
+    refreshSession,
     lastSaleResult,
     refreshCatalog,
   } = usePOS();
@@ -52,6 +57,7 @@ const NewOrder: React.FC = () => {
   const [scoopModalProduct, setScoopModalProduct] = useState<ProductRow | null>(null);
   const [weightModalProduct, setWeightModalProduct] = useState<ProductRow | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [isCashRegisterOpen, setIsCashRegisterOpen] = useState(false);
   const [saleSuccessMessage, setSaleSuccessMessage] = useState<string | null>(null);
 
   // Manipular clique no produto
@@ -81,7 +87,10 @@ const NewOrder: React.FC = () => {
   };
 
   return (
-    <POSLayout>
+    <POSLayout
+      sessionStatus={activeSession ? 'OPEN' : 'CLOSED'}
+      onOpenCashRegister={() => setIsCashRegisterOpen(true)}
+    >
       <div className="flex h-full w-full overflow-hidden">
         
         {/* Painel Esquerdo: Catálogo & Seleção Touch */}
@@ -398,6 +407,18 @@ const NewOrder: React.FC = () => {
           totalAmount={total}
           onFinalize={handleCheckoutSuccess}
           isProcessing={isProcessingSale}
+        />
+      )}
+
+      {/* Modal de Gestão e Operações de Caixa */}
+      {isCashRegisterOpen && (
+        <CashRegisterModal
+          isOpen={isCashRegisterOpen}
+          onClose={() => setIsCashRegisterOpen(false)}
+          terminalId={activeTerminalId}
+          employeeId={activeCashierId}
+          currentSession={activeSession}
+          onSessionUpdated={refreshSession}
         />
       )}
     </POSLayout>

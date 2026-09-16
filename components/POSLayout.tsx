@@ -6,6 +6,7 @@ interface POSLayoutProps {
   operatorName?: string;
   terminalCode?: string;
   sessionStatus?: 'OPEN' | 'CLOSED';
+  onOpenCashRegister?: () => void;
 }
 
 const POSLayout: React.FC<POSLayoutProps> = ({
@@ -13,6 +14,7 @@ const POSLayout: React.FC<POSLayoutProps> = ({
   operatorName = 'Operador Padrão',
   terminalCode = 'CAIXA-01',
   sessionStatus = 'OPEN',
+  onOpenCashRegister,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -99,6 +101,30 @@ const POSLayout: React.FC<POSLayoutProps> = ({
             <span className="material-symbols-outlined text-xl">
               {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
             </span>
+          </button>
+
+          {/* Caixa Status & Action Button */}
+          <button
+            onClick={onOpenCashRegister}
+            type="button"
+            className={`flex h-11 items-center gap-2 rounded-xl px-3 border transition-all cursor-pointer active:scale-95 ${
+              sessionStatus === 'OPEN'
+                ? 'bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-300 border-green-300 dark:border-green-800 hover:bg-green-100'
+                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-100 animate-pulse'
+            }`}
+            title="Abrir Painel de Caixa / Sangrias / Fechamento"
+          >
+            <span className="material-symbols-outlined text-lg">
+              {sessionStatus === 'OPEN' ? 'lock_open' : 'lock'}
+            </span>
+            <div className="flex flex-col text-left">
+              <span className="text-[10px] uppercase font-bold leading-none">
+                {sessionStatus === 'OPEN' ? 'Caixa Aberto' : 'Caixa Fechado'}
+              </span>
+              <span className="text-xs font-black">
+                {sessionStatus === 'OPEN' ? 'Gerenciar' : 'Abrir Caixa'}
+              </span>
+            </div>
           </button>
 
           {/* Operator Chip */}
