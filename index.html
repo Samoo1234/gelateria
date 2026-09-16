@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sorveteria Gelato</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@300;400;500;600;700&family=Varela+Round&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#3B82F6",
+              secondary: "#60A5FA",
+              cta: "#F97316",
+              "background-light": "#F8FAFC",
+              "background-dark": "#0F172A",
+              "surface-light": "#ffffff",
+              "surface-dark": "#1E293B",
+              "coffee-brown": "#6F4E37",
+              "cream": "#FDFBF7",
+              mint: "#A8D8B9",
+              strawberry: "#F7C5CC",
+              vanilla: "#FDF5E6",
+            },
+            fontFamily: {
+              display: ["Varela Round", "sans-serif"],
+              body: ["Nunito Sans", "sans-serif"],
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              "2xl": "1rem",
+              "3xl": "1.5rem",
+              full: "9999px",
+            },
+            boxShadow: {
+              'glass': '0 4px 30px rgba(0, 0, 0, 0.1)',
+              'glass-hover': '0 8px 32px rgba(0, 0, 0, 0.15)',
+            },
+            transitionTimingFunction: {
+              'fluid': 'cubic-bezier(0.4, 0, 0.2, 1)',
+              'bounce-soft': 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+            }
+          },
+        },
+      };
+    </script>
+    <style>
+      .material-symbols-outlined {
+        font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+      }
+      .material-symbols-outlined.fill {
+        font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
+      }
+      body {
+        font-family: 'Nunito Sans', sans-serif;
+      }
+      h1, h2, h3, h4, h5, h6, .font-display {
+        font-family: 'Varela Round', sans-serif;
+      }
+      /* Custom Scrollbar for a premium feel */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #334155;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.9.6",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-background-light dark:bg-background-dark text-[#0d1b14] dark:text-[#e7f3ed]">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
