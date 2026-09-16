@@ -3,6 +3,7 @@ import { POSLayout } from '../components/POSLayout';
 import { usePOS, CartItemUI } from '../hooks/usePOS';
 import { ProductRow } from '../services/orderService';
 import { ScoopSelectionModal } from '../components/ScoopSelectionModal';
+import { WeightSelectionModal } from '../components/WeightSelectionModal';
 import { CheckoutModal } from '../components/CheckoutModal';
 import { 
   Search, 
@@ -22,6 +23,7 @@ const NewOrder: React.FC = () => {
   const {
     categories,
     scoopContainers,
+    weightContainers,
     availableFlavors,
     activeCategoryId,
     setActiveCategoryId,
@@ -34,6 +36,7 @@ const NewOrder: React.FC = () => {
     total,
     addUnitProduct,
     addScoopItem,
+    addWeightItem,
     updateItemQuantity,
     removeCartItem,
     clearCart,
@@ -47,6 +50,7 @@ const NewOrder: React.FC = () => {
 
   // Estados de modais
   const [scoopModalProduct, setScoopModalProduct] = useState<ProductRow | null>(null);
+  const [weightModalProduct, setWeightModalProduct] = useState<ProductRow | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [saleSuccessMessage, setSaleSuccessMessage] = useState<string | null>(null);
 
@@ -59,7 +63,7 @@ const NewOrder: React.FC = () => {
     }
 
     if (product.sale_type === 'WEIGHT') {
-      alert('Venda por quilo integrada com balança e taras automáticas no Sprint 4!');
+      setWeightModalProduct(product);
       return;
     }
 
@@ -369,6 +373,19 @@ const NewOrder: React.FC = () => {
           availableFlavors={availableFlavors}
           onConfirm={(container, flavors, notes) => {
             addScoopItem(scoopModalProduct, container, flavors, notes);
+          }}
+        />
+      )}
+
+      {/* Modal de Pesagem / Tara Automática por Quilo */}
+      {weightModalProduct && (
+        <WeightSelectionModal
+          isOpen={!!weightModalProduct}
+          onClose={() => setWeightModalProduct(null)}
+          product={weightModalProduct}
+          availableContainers={weightContainers}
+          onConfirm={(container, grossWeightKg, notes) => {
+            addWeightItem(weightModalProduct, container, grossWeightKg, notes);
           }}
         />
       )}
