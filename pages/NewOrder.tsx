@@ -1,197 +1,389 @@
-import React, { useState, useMemo } from 'react';
-import { NavLink } from 'react-router-dom';
-import { PRODUCTS, CATEGORIES } from '../constants';
-import { Product, CartItem } from '../types';
+import React, { useState } from 'react';
+import { POSLayout } from '../components/POSLayout';
+import { usePOS, CartItemUI } from '../hooks/usePOS';
+import { ProductRow } from '../services/orderService';
+import { ScoopSelectionModal } from '../components/ScoopSelectionModal';
+import { CheckoutModal } from '../components/CheckoutModal';
+import { 
+  Search, 
+  Trash2, 
+  Plus, 
+  Minus, 
+  ShoppingBag, 
+  Sparkles, 
+  IceCream, 
+  CheckCircle2, 
+  RefreshCw,
+  AlertTriangle,
+  Scale
+} from 'lucide-react';
 
 const NewOrder: React.FC = () => {
-  const [activeCategory, setActiveCategory] = useState('Casquinha');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const {
+    categories,
+    scoopContainers,
+    availableFlavors,
+    activeCategoryId,
+    setActiveCategoryId,
+    searchQuery,
+    setSearchQuery,
+    filteredProducts,
+    cart,
+    subtotal,
+    discount,
+    total,
+    addUnitProduct,
+    addScoopItem,
+    updateItemQuantity,
+    removeCartItem,
+    clearCart,
+    finalizeSale,
+    isLoadingCatalog,
+    isProcessingSale,
+    catalogError,
+    lastSaleResult,
+    refreshCatalog,
+  } = usePOS();
 
-  const filteredProducts = useMemo(() => {
-    return PRODUCTS.filter(p => {
-      const matchesCategory = activeCategory === 'Bebidas' ? true : p.category === activeCategory; // Mock behavior for categories not fully populated
-      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-      // For demo purposes, if category is 'Casquinha', show specific items, else show random fallback if empty
-      return (p.category === activeCategory) && matchesSearch;
-    });
-  }, [activeCategory, searchQuery]);
+  // Estados de modais
+  const [scoopModalProduct, setScoopModalProduct] = useState<ProductRow | null>(null);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [saleSuccessMessage, setSaleSuccessMessage] = useState<string | null>(null);
 
-  const addToCart = (product: Product) => {
-    setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
-      }
-      return [...prev, { ...product, quantity: 1 }];
-    });
+  // Manipular clique no produto
+  const handleProductClick = (product: ProductRow) => {
+    // Se for sorvete por bola ou tiver recipientes associados
+    if (product.sale_type === 'SCOOP' || product.is_flavor) {
+      setScoopModalProduct(product);
+      return;
+    }
+
+    if (product.sale_type === 'WEIGHT') {
+      alert('Venda por quilo integrada com balança e taras automáticas no Sprint 4!');
+      return;
+    }
+
+    // Caso padrão: produto unitário
+    addUnitProduct(product);
   };
 
-  const removeFromCart = (id: string) => {
-    setCart(prev => prev.filter(item => item.id !== id));
+  const handleCheckoutSuccess = async (payments: any) => {
+    const result = await finalizeSale(payments);
+    setSaleSuccessMessage(`Pedido ${result.order_number} finalizado com sucesso! Total: R$ ${result.total.toFixed(2).replace('.', ',')}`);
+    setTimeout(() => {
+      setSaleSuccessMessage(null);
+    }, 4000);
+    return result;
   };
-
-  const updateQuantity = (id: string, delta: number) => {
-    setCart(prev => prev.map(item => {
-      if (item.id === id) {
-        const newQty = Math.max(1, item.quantity + delta);
-        return { ...item, quantity: newQty };
-      }
-      return item;
-    }));
-  };
-
-  const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
 
   return (
-    <div className="relative flex h-screen min-h-screen w-full flex-col group/design-root overflow-hidden bg-background-light dark:bg-background-dark text-[#0d1b14] dark:text-surface-light font-display">
-      {/* TopNavBar */}
-      <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-primary/20 dark:border-primary/10 px-6 py-3 bg-background-light dark:bg-background-dark/80 backdrop-blur-sm z-20">
-        <NavLink to="/dashboard" className="flex items-center gap-4 text-[#0d1b14] dark:text-background-light">
-          <div className="size-6 text-primary">
-            <svg fill="currentColor" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-              <path d="M44 4H30.6666V17.3334H17.3334V30.6666H4V44H44V4Z"></path>
-            </svg>
-          </div>
-          <h2 className="text-lg font-bold leading-tight tracking-[-0.015em]">Sorveteria Gelato</h2>
-        </NavLink>
-        <div className="flex flex-1 justify-end items-center gap-4">
-          <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">Ana Souza</span>
-          <div className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10" style={{backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuCrZ05NrFFHoPbctAiwIzkNGfu8PBaXmnxw2AUJDhARPi71qAItKQpRIOu_ceqvTASTTJ1BHskHbTfa_5rmjop9VFg-SYfflnc27VQOOfUMDIfUNRcvYAQx-intdKSKHohNOfjZ5SYI1WxUpxlhLOUdd11CJKOoXCB5YJ8dQSd9mM91rrreCJ4naUMWqkWvaN1P-upBCjjpnMmRbWn8SEj0cxWMnq4G1g5IGieh4WMLiBsdJlLlehgHNTwtmPTJGlGzXGLafrc2KcA")'}}></div>
-          <NavLink to="/" className="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary/20 dark:bg-primary/30 text-[#0d1b14] dark:text-background-light text-sm font-bold leading-normal tracking-[0.015em] hover:bg-primary/30 dark:hover:bg-primary/40 transition-colors">
-            <span className="truncate">Sair</span>
-          </NavLink>
-        </div>
-      </header>
-
-      {/* Main Content Grid */}
-      <main className="flex h-full grow flex-row overflow-hidden">
-        {/* Left Panel: Product Selection */}
-        <div className="flex flex-col w-3/5 border-r border-primary/20 dark:border-primary/10">
-          <div className="p-6 border-b border-primary/20 dark:border-primary/10">
-            <div className="flex flex-wrap justify-between gap-3">
-              <p className="text-[#0d1b14] dark:text-background-light text-4xl font-black leading-tight tracking-[-0.033em] min-w-72">Novo Pedido</p>
-            </div>
-            <div className="pt-4">
-              <label className="flex flex-col min-w-40 h-12 w-full">
-                <div className="flex w-full flex-1 items-stretch rounded-lg h-full">
-                  <div className="text-[#4c9a73] dark:text-primary/70 flex border-none bg-primary/20 dark:bg-primary/10 items-center justify-center pl-4 rounded-l-lg border-r-0">
-                    <span className="material-symbols-outlined">search</span>
-                  </div>
-                  <input 
-                    className="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-r-lg text-[#0d1b14] dark:text-background-light focus:outline-0 focus:ring-2 focus:ring-primary/50 border-none bg-primary/20 dark:bg-primary/10 h-full placeholder:text-[#4c9a73] dark:placeholder:text-primary/70 px-4 pl-2 text-base font-normal leading-normal" 
-                    placeholder="Buscar produtos ou sabores" 
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-              </label>
-            </div>
-          </div>
+    <POSLayout>
+      <div className="flex h-full w-full overflow-hidden">
+        
+        {/* Painel Esquerdo: Catálogo & Seleção Touch */}
+        <div className="flex flex-col w-3/5 border-r border-primary/20 bg-background-light dark:bg-background-dark">
           
-          <div className="pb-3 border-b border-primary/20 dark:border-primary/10">
-            <div className="flex px-4 gap-8">
-              {CATEGORIES.map(cat => (
-                <button 
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  className={`flex flex-col items-center justify-center border-b-[3px] pb-[13px] pt-4 transition-colors cursor-pointer ${
-                    activeCategory === cat 
-                      ? 'border-b-primary text-[#0d1b14] dark:text-background-light' 
-                      : 'border-b-transparent text-[#4c9a73] dark:text-primary/70 hover:text-[#0d1b14] dark:hover:text-background-light'
+          {/* Barra de Busca & Ações Rápidas */}
+          <div className="p-4 border-b border-primary/20 bg-surface-light dark:bg-surface-dark/50">
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-5 text-primary" />
+                <input
+                  type="text"
+                  placeholder="Buscar produtos pelo nome ou sabor..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-11 pr-4 py-3 rounded-xl border border-primary/20 bg-primary/5 focus:bg-surface-light dark:focus:bg-surface-dark text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted hover:text-primary px-2 py-1"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={refreshCatalog}
+                title="Recarregar catálogo do servidor"
+                className="p-3 rounded-xl border border-primary/20 bg-primary/5 hover:bg-primary/15 text-primary transition-colors active:scale-95"
+              >
+                <RefreshCw className="size-5" />
+              </button>
+            </div>
+
+            {/* Categorias Touch Bar */}
+            <div className="flex items-center gap-2 overflow-x-auto pt-3 pb-1 scrollbar-none">
+              <button
+                onClick={() => setActiveCategoryId(null)}
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs shrink-0 transition-all cursor-pointer min-h-[42px] ${
+                  activeCategoryId === null
+                    ? 'bg-primary text-[#0d1b14] shadow-sm'
+                    : 'bg-primary/10 hover:bg-primary/20 text-[#0d1b14] dark:text-surface-light'
+                }`}
+              >
+                Todos
+              </button>
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveCategoryId(cat.id)}
+                  className={`px-4 py-2.5 rounded-xl font-bold text-xs shrink-0 transition-all cursor-pointer min-h-[42px] ${
+                    activeCategoryId === cat.id
+                      ? 'bg-primary text-[#0d1b14] shadow-sm'
+                      : 'bg-primary/10 hover:bg-primary/20 text-[#0d1b14] dark:text-surface-light'
                   }`}
                 >
-                  <p className="text-sm font-bold leading-normal tracking-[0.015em]">{cat}</p>
+                  {cat.name}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="flex-grow overflow-y-auto p-6">
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(158px,1fr))] gap-4">
-              {filteredProducts.map(product => (
-                <div key={product.id} className="flex flex-col gap-3 pb-3 cursor-pointer group" onClick={() => addToCart(product)}>
-                  <div 
-                    className="w-full bg-center bg-no-repeat aspect-square bg-cover rounded-xl transition-transform group-hover:scale-105" 
-                    style={{backgroundImage: `url("${product.image}")`}}
-                  ></div>
-                  <div>
-                    <p className="text-[#0d1b14] dark:text-background-light text-base font-medium leading-normal">{product.name}</p>
-                    <p className="text-[#4c9a73] dark:text-primary/80 text-sm font-normal leading-normal">R$ {product.price.toFixed(2).replace('.', ',')}</p>
-                  </div>
-                </div>
-              ))}
-              {filteredProducts.length === 0 && (
-                <div className="col-span-full flex flex-col items-center justify-center py-10 text-gray-500">
-                  <p>Nenhum produto encontrado nesta categoria.</p>
-                </div>
-              )}
-            </div>
+          {/* Grid de Produtos Touch */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+            {catalogError && (
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-300 text-red-700 dark:text-red-300 mb-4">
+                <AlertTriangle className="size-5 shrink-0" />
+                <span className="text-sm font-medium">{catalogError}</span>
+              </div>
+            )}
+
+            {isLoadingCatalog ? (
+              <div className="flex flex-col items-center justify-center h-64 gap-3 text-text-muted">
+                <RefreshCw className="size-8 animate-spin text-primary" />
+                <p className="text-sm font-semibold">Carregando catálogo oficial...</p>
+              </div>
+            ) : filteredProducts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-64 text-center text-text-muted">
+                <ShoppingBag className="size-12 mb-2 opacity-40" />
+                <p className="text-base font-semibold">Nenhum produto encontrado</p>
+                <p className="text-xs">Tente outra categoria ou termo de busca.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {filteredProducts.map((product) => {
+                  const isScoop = product.sale_type === 'SCOOP' || product.is_flavor;
+                  const isWeight = product.sale_type === 'WEIGHT';
+                  return (
+                    <button
+                      key={product.id}
+                      onClick={() => handleProductClick(product)}
+                      className="group flex flex-col justify-between p-3.5 rounded-2xl border border-primary/20 bg-surface-light dark:bg-surface-dark hover:border-primary hover:shadow-lg transition-all text-left cursor-pointer active:scale-95 min-h-[130px]"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-1 mb-1.5">
+                          <span className="font-bold text-sm text-[#0d1b14] dark:text-surface-light line-clamp-2 leading-tight">
+                            {product.name}
+                          </span>
+                          {isScoop && (
+                            <span className="shrink-0 p-1 rounded-md bg-primary/20 text-primary" title="Sorvete por Bola">
+                              <IceCream className="size-3.5" />
+                            </span>
+                          )}
+                          {isWeight && (
+                            <span className="shrink-0 p-1 rounded-md bg-caramel/20 text-caramel" title="Por Quilo">
+                              <Scale className="size-3.5" />
+                            </span>
+                          )}
+                        </div>
+
+                        {product.description && (
+                          <p className="text-[11px] text-text-muted line-clamp-2 mb-2">
+                            {product.description}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between mt-auto pt-2 border-t border-primary/10">
+                        <span className="text-xs text-text-muted">
+                          {isWeight ? 'Por kg' : isScoop ? 'Por bola' : 'Unidade'}
+                        </span>
+                        <span className="text-sm font-extrabold text-primary">
+                          R$ {Number(product.price).toFixed(2).replace('.', ',')}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right Panel: Order Summary */}
-        <div className="flex flex-col w-2/5 bg-primary/10 dark:bg-primary/5">
-          <div className="p-6">
-            <h3 className="text-2xl font-bold text-[#0d1b14] dark:text-background-light">Resumo do Pedido</h3>
-          </div>
+        {/* Painel Direito: Carrinho Touchscreen & Checkout */}
+        <div className="flex flex-col w-2/5 bg-primary/5 dark:bg-primary/5 border-l border-primary/10">
           
-          <div className="flex-grow overflow-y-auto px-6 space-y-4">
+          {/* Header do Carrinho */}
+          <div className="flex items-center justify-between p-4 border-b border-primary/20 bg-surface-light dark:bg-surface-dark/50">
+            <div className="flex items-center gap-2">
+              <ShoppingBag className="size-5 text-primary" />
+              <h3 className="font-bold text-base text-[#0d1b14] dark:text-surface-light">
+                Itens do Pedido ({cart.length})
+              </h3>
+            </div>
+            {cart.length > 0 && (
+              <button
+                onClick={clearCart}
+                className="flex items-center gap-1 text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                <Trash2 className="size-3.5" />
+                Limpar
+              </button>
+            )}
+          </div>
+
+          {/* Banner de Sucesso de Venda */}
+          {saleSuccessMessage && (
+            <div className="mx-4 mt-3 flex items-center gap-2 p-3 rounded-xl bg-green-100 dark:bg-green-900/40 border border-green-300 dark:border-green-700 text-green-800 dark:text-green-200 text-xs font-bold animate-in fade-in">
+              <CheckCircle2 className="size-4 shrink-0 text-green-600 dark:text-green-400" />
+              <span>{saleSuccessMessage}</span>
+            </div>
+          )}
+
+          {/* Lista de Itens do Carrinho */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
             {cart.length === 0 ? (
-              <div className="text-center text-gray-500 mt-10">Carrinho vazio</div>
+              <div className="flex flex-col items-center justify-center h-full text-center text-text-muted py-12">
+                <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center mb-3 text-primary/60">
+                  <IceCream className="size-8" />
+                </div>
+                <p className="font-bold text-sm">O pedido está vazio</p>
+                <p className="text-xs text-text-muted max-w-[200px] mt-1">
+                  Toque nos produtos ou sabores ao lado para adicionar ao pedido.
+                </p>
+              </div>
             ) : (
-              cart.map(item => (
-                <div key={item.id} className="flex items-center gap-4 bg-background-light dark:bg-background-dark/30 p-4 rounded-xl shadow-sm animate-in fade-in slide-in-from-right-4 duration-300">
-                  <img alt={item.name} className="size-16 rounded-lg object-cover" src={item.image} />
-                  <div className="flex-grow">
-                    <p className="font-bold text-[#0d1b14] dark:text-background-light">{item.category} - {item.name}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{item.quantity}x R$ {item.price.toFixed(2).replace('.', ',')}</p>
-                  </div>
-                  <div className="flex items-center gap-2 text-[#0d1b14] dark:text-background-light">
-                    <button 
-                      onClick={() => updateQuantity(item.id, -1)}
-                      className="flex items-center justify-center size-7 rounded-full bg-primary/20 dark:bg-primary/30 hover:bg-primary/30 dark:hover:bg-primary/40 transition-colors"
+              cart.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex flex-col p-3 rounded-xl border border-primary/20 bg-surface-light dark:bg-surface-dark shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h4 className="font-bold text-sm text-[#0d1b14] dark:text-surface-light leading-tight">
+                        {item.productName}
+                      </h4>
+                      {item.selectedFlavors && item.selectedFlavors.length > 0 && (
+                        <p className="text-xs text-text-muted mt-0.5">
+                          Sabores: <strong>{item.selectedFlavors.join(' + ')}</strong>
+                        </p>
+                      )}
+                      {item.notes && (
+                        <p className="text-[11px] text-caramel italic mt-0.5">
+                          Obs: {item.notes}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeCartItem(item.id)}
+                      className="text-text-muted hover:text-red-500 p-1 rounded-md transition-colors"
                     >
-                      <span className="material-symbols-outlined text-base">remove</span>
-                    </button>
-                    <span className="font-bold w-4 text-center">{item.quantity}</span>
-                    <button 
-                      onClick={() => updateQuantity(item.id, 1)}
-                      className="flex items-center justify-center size-7 rounded-full bg-primary/20 dark:bg-primary/30 hover:bg-primary/30 dark:hover:bg-primary/40 transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-base">add</span>
+                      <Trash2 className="size-4" />
                     </button>
                   </div>
-                  <p className="font-bold text-lg text-[#0d1b14] dark:text-background-light w-20 text-right">R$ {(item.price * item.quantity).toFixed(2).replace('.', ',')}</p>
-                  <button onClick={() => removeFromCart(item.id)} className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300">
-                    <span className="material-symbols-outlined">delete</span>
-                  </button>
+
+                  {/* Controles de Quantidade e Valor */}
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-primary/10">
+                    <div className="flex items-center gap-2">
+                      {item.saleType !== 'WEIGHT' ? (
+                        <>
+                          <button
+                            onClick={() => updateItemQuantity(item.id, -1)}
+                            className="size-7 rounded-lg bg-primary/20 text-[#0d1b14] dark:text-surface-light hover:bg-primary/30 flex items-center justify-center transition-colors active:scale-95"
+                          >
+                            <Minus className="size-3.5" />
+                          </button>
+                          <span className="font-extrabold text-sm w-5 text-center">
+                            {item.quantity}
+                          </span>
+                          <button
+                            onClick={() => updateItemQuantity(item.id, 1)}
+                            className="size-7 rounded-lg bg-primary/20 text-[#0d1b14] dark:text-surface-light hover:bg-primary/30 flex items-center justify-center transition-colors active:scale-95"
+                          >
+                            <Plus className="size-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs font-semibold text-text-muted">
+                          {item.netWeight?.toFixed(3)} kg
+                        </span>
+                      )}
+                    </div>
+
+                    <span className="font-black text-sm text-primary">
+                      R$ {item.subtotal.toFixed(2).replace('.', ',')}
+                    </span>
+                  </div>
                 </div>
               ))
             )}
           </div>
 
-          <div className="p-6 mt-auto border-t-2 border-dashed border-primary/30 dark:border-primary/20 space-y-4">
-            <div className="flex justify-between items-center text-[#0d1b14] dark:text-background-light">
-              <span className="text-base font-medium">Subtotal</span>
-              <span className="text-base font-medium">R$ {total.toFixed(2).replace('.', ',')}</span>
+          {/* Rodapé: Totais e Botão de Finalização */}
+          <div className="p-4 border-t-2 border-dashed border-primary/30 bg-surface-light dark:bg-surface-dark space-y-3">
+            <div className="flex justify-between text-xs text-text-muted font-semibold">
+              <span>Subtotal</span>
+              <span>R$ {subtotal.toFixed(2).replace('.', ',')}</span>
             </div>
-            <div className="flex justify-between items-center text-[#0d1b14] dark:text-background-light">
-              <span className="text-base font-medium">Descontos</span>
-              <span className="text-base font-medium text-red-500">- R$ 0,00</span>
+            
+            {discount > 0 && (
+              <div className="flex justify-between text-xs text-red-500 font-semibold">
+                <span>Desconto</span>
+                <span>- R$ {discount.toFixed(2).replace('.', ',')}</span>
+              </div>
+            )}
+
+            <div className="flex justify-between items-baseline pt-1 border-t border-primary/10">
+              <span className="text-base font-black text-[#0d1b14] dark:text-surface-light">
+                Total a Pagar
+              </span>
+              <span className="text-2xl font-black text-primary">
+                R$ {total.toFixed(2).replace('.', ',')}
+              </span>
             </div>
-            <div className="flex justify-between items-center text-[#0d1b14] dark:text-background-light mt-2 pt-2 border-t border-primary/20 dark:border-primary/10">
-              <span className="text-2xl font-black">Total</span>
-              <span className="text-2xl font-black">R$ {total.toFixed(2).replace('.', ',')}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-4 pt-4">
-              <button onClick={() => setCart([])} className="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-4 bg-primary/20 dark:bg-primary/30 text-[#0d1b14] dark:text-background-light text-base font-bold leading-normal tracking-[0.015em] hover:bg-primary/30 dark:hover:bg-primary/40 transition-colors">Limpar</button>
-              <button onClick={() => alert('Pedido finalizado!')} className="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-4 bg-primary text-[#0d1b14] dark:text-background-dark text-base font-bold leading-normal tracking-[0.015em] hover:bg-opacity-90 transition-colors">Finalizar Pedido</button>
-            </div>
+
+            <button
+              onClick={() => setIsCheckoutOpen(true)}
+              disabled={cart.length === 0 || isProcessingSale}
+              className="w-full py-4 rounded-xl font-black text-base bg-primary text-[#0d1b14] hover:bg-opacity-90 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Sparkles className="size-5" />
+              Cobrar / Finalizar (R$ {total.toFixed(2).replace('.', ',')})
+            </button>
           </div>
+
         </div>
-      </main>
-    </div>
+
+      </div>
+
+      {/* Modal de Escolha de Bolas / Sabores */}
+      {scoopModalProduct && (
+        <ScoopSelectionModal
+          isOpen={!!scoopModalProduct}
+          onClose={() => setScoopModalProduct(null)}
+          baseProduct={scoopModalProduct}
+          availableContainers={scoopContainers}
+          availableFlavors={availableFlavors}
+          onConfirm={(container, flavors, notes) => {
+            addScoopItem(scoopModalProduct, container, flavors, notes);
+          }}
+        />
+      )}
+
+      {/* Modal de Pagamento & Finalização Atômica */}
+      {isCheckoutOpen && (
+        <CheckoutModal
+          isOpen={isCheckoutOpen}
+          onClose={() => setIsCheckoutOpen(false)}
+          totalAmount={total}
+          onFinalize={handleCheckoutSuccess}
+          isProcessing={isProcessingSale}
+        />
+      )}
+    </POSLayout>
   );
 };
 

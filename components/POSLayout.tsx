@@ -133,4 +133,5 @@ const POSLayout: React.FC<POSLayoutProps> = ({
   );
 };
 
+export { POSLayout };
 export default POSLayout;
