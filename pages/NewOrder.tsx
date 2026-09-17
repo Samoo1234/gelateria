@@ -17,8 +17,10 @@ import {
   CheckCircle2, 
   RefreshCw,
   AlertTriangle,
-  Scale
+  Scale,
+  Printer
 } from 'lucide-react';
+import { defaultReceiptPrinter } from '../services/printer/ReceiptPrinterAdapter';
 
 const NewOrder: React.FC = () => {
   const {
@@ -59,6 +61,29 @@ const NewOrder: React.FC = () => {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isCashRegisterOpen, setIsCashRegisterOpen] = useState(false);
   const [saleSuccessMessage, setSaleSuccessMessage] = useState<string | null>(null);
+
+  // Atalhos de teclado operacionais para touchscreen e operador (Etapa 31)
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F2') {
+        e.preventDefault();
+        clearCart();
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        if (cart.length > 0 && !isCheckoutOpen) {
+          setIsCheckoutOpen(true);
+        }
+      } else if (e.key === 'Escape') {
+        setScoopModalProduct(null);
+        setWeightModalProduct(null);
+        setIsCheckoutOpen(false);
+        setIsCashRegisterOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cart.length, isCheckoutOpen, clearCart]);
 
   // Manipular clique no produto
   const handleProductClick = (product: ProductRow) => {
@@ -407,6 +432,10 @@ const NewOrder: React.FC = () => {
           totalAmount={total}
           onFinalize={handleCheckoutSuccess}
           isProcessing={isProcessingSale}
+          cartItems={cart}
+          discount={discount}
+          terminalCode="CAIXA-01"
+          operatorName="Operador PDV"
         />
       )}
 

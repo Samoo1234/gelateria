@@ -59,8 +59,14 @@ export const ScoopSelectionModal: React.FC<ScoopSelectionModalProps> = ({
   };
 
   const containerPrice = Number(selectedContainer?.price || 0);
-  const scoopPrice = Number(baseProduct.price);
-  const calculatedTotal = (scoopPrice * Math.max(1, selectedFlavors.length)) + containerPrice;
+  const scoopCount = Math.max(1, selectedFlavors.length);
+  const progressiveScale: Record<number, number> = { 1: 7.00, 2: 12.00, 3: 16.00 };
+  const baseScoopPrice = progressiveScale[scoopCount] || (Number(baseProduct.price) * scoopCount);
+  const premiumTotal = selectedFlavors.reduce((acc, flvName) => {
+    const flavorProd = availableFlavors.find(f => f.name === flvName);
+    return acc + (flavorProd?.is_premium ? Number(flavorProd.premium_surcharge || 0) : 0);
+  }, 0);
+  const calculatedTotal = baseScoopPrice + containerPrice + premiumTotal;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -77,7 +83,7 @@ export const ScoopSelectionModal: React.FC<ScoopSelectionModalProps> = ({
                 Montar Sorvete por Bola
               </h3>
               <p className="text-xs text-text-muted">
-                Escolha o recipiente e até {maxScoops} {maxScoops > 1 ? 'sabores' : 'sabor'}
+                Escolha o recipiente e até {maxScoops} {maxScoops > 1 ? 'sabores' : 'sabor'} (1 bola: R$ 7 | 2 bolas: R$ 12 | 3 bolas: R$ 16)
               </p>
             </div>
           </div>
@@ -150,20 +156,28 @@ export const ScoopSelectionModal: React.FC<ScoopSelectionModalProps> = ({
                   Nenhum sabor adicionado ainda. Toque nos sabores abaixo.
                 </p>
               ) : (
-                selectedFlavors.map((flavor, idx) => (
-                  <div
-                    key={`${flavor}-${idx}`}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-[#0d1b14] font-bold text-sm shadow-sm"
-                  >
-                    <span>Bola {idx + 1}: {flavor}</span>
-                    <button
-                      onClick={() => handleRemoveFlavor(idx)}
-                      className="size-5 rounded-full bg-black/10 hover:bg-black/20 flex items-center justify-center transition-colors"
+                selectedFlavors.map((flavor, idx) => {
+                  const flavorObj = availableFlavors.find(f => f.name === flavor);
+                  return (
+                    <div
+                      key={`${flavor}-${idx}`}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-[#0d1b14] font-bold text-sm shadow-sm"
                     >
-                      <X className="size-3" />
-                    </button>
-                  </div>
-                ))
+                      <span>Bola {idx + 1}: {flavor}</span>
+                      {flavorObj?.is_premium && (
+                        <span className="text-[10px] bg-amber-500 text-black px-1.5 py-0.5 rounded font-black">
+                          PREMIUM
+                        </span>
+                      )}
+                      <button
+                        onClick={() => handleRemoveFlavor(idx)}
+                        className="size-5 rounded-full bg-black/10 hover:bg-black/20 flex items-center justify-center transition-colors"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -182,18 +196,25 @@ export const ScoopSelectionModal: React.FC<ScoopSelectionModalProps> = ({
                     key={f.id}
                     onClick={() => handleAddFlavor(f.name)}
                     disabled={isFull}
-                    className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all min-h-[54px] active:scale-95 ${
+                    className={`flex flex-col justify-between p-3 rounded-xl border text-left transition-all min-h-[64px] active:scale-95 ${
                       isFull
                         ? 'opacity-50 border-gray-200 dark:border-gray-800 cursor-not-allowed bg-gray-50 dark:bg-gray-900/50'
                         : 'border-primary/20 hover:border-primary bg-surface-light dark:bg-surface-dark cursor-pointer hover:bg-primary/5'
                     }`}
                   >
-                    <span className="font-semibold text-sm text-[#0d1b14] dark:text-surface-light">
-                      {f.name}
-                    </span>
-                    {countOfThis > 0 && (
-                      <span className="size-6 rounded-full bg-primary text-[#0d1b14] font-extrabold text-xs flex items-center justify-center ml-1">
-                        {countOfThis}x
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-semibold text-sm text-[#0d1b14] dark:text-surface-light">
+                        {f.name}
+                      </span>
+                      {countOfThis > 0 && (
+                        <span className="size-6 rounded-full bg-primary text-[#0d1b14] font-extrabold text-xs flex items-center justify-center ml-1">
+                          {countOfThis}x
+                        </span>
+                      )}
+                    </div>
+                    {f.is_premium && (
+                      <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-1.5 py-0.5 rounded w-max mt-1">
+                        PREMIUM (+R$ {Number(f.premium_surcharge || 2).toFixed(2).replace('.', ',')})
                       </span>
                     )}
                   </button>

@@ -14,6 +14,7 @@ const Sidebar: React.FC = () => {
     { name: 'Relatórios', icon: 'bar_chart', path: '/reports' },
     { name: 'Análise de Custos', icon: 'monitoring', path: '/cost-analysis' },
     { name: 'Funcionários', icon: 'group', path: '/employees' },
+    { name: 'Auditoria', icon: 'security', path: '/audit-logs' },
   ];
 
   return (

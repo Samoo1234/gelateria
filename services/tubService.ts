@@ -106,5 +106,55 @@ export const tubService = {
     }
 
     return data;
+  },
+
+  /**
+   * Reconcilia a cuba com o peso físico real medido na balança (Etapa 5).
+   * Executa RPC atômica que compara peso estimado vs real, registra diferença
+   * e, se houver perda física, lança em stock_losses e audit_logs.
+   */
+  async reconcileTub(
+    tubId: string,
+    physicalWeightKg: number,
+    employeeId: string,
+    terminalId: string,
+    reason?: string
+  ) {
+    const { data, error } = await supabase.rpc('reconcile_tub', {
+      p_tub_id: tubId,
+      p_physical_weight_kg: Number(physicalWeightKg.toFixed(3)),
+      p_employee_id: employeeId,
+      p_terminal_id: terminalId,
+      p_reason: reason || 'Aferição periódica de estoque em balcão'
+    });
+
+    if (error) {
+      console.error('Erro na RPC reconcile_tub:', error);
+      throw new Error(error.message || 'Falha ao reconciliar cuba.');
+    }
+
+    return data;
+  },
+
+  /**
+   * Consulta histórico de reconciliações de cubas
+   */
+  async getReconciliations(limit: number = 20) {
+    const { data, error } = await supabase
+      .from('tub_reconciliations')
+      .select(`
+        *,
+        tubs:tub_id(code, flavor_product_id, products:flavor_product_id(name)),
+        employees:employee_id(name)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('Erro ao buscar reconciliações:', error);
+      return [];
+    }
+
+    return data || [];
   }
 };

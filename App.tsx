@@ -11,6 +11,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Ingredients = lazy(() => import('./pages/Ingredients'));
 const Recipes = lazy(() => import('./pages/Recipes'));
 const CostAnalysis = lazy(() => import('./pages/CostAnalysis'));
+const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 
 const PageLoader: React.FC = () => (
   <div className="flex h-screen w-full items-center justify-center bg-background-light dark:bg-background-dark">
@@ -36,6 +37,7 @@ const App: React.FC = () => {
           <Route path="/reports" element={<Reports />} />
           <Route path="/cost-analysis" element={<CostAnalysis />} />
           <Route path="/employees" element={<Employees />} />
+          <Route path="/audit-logs" element={<AuditLogs />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Suspense>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PaymentPayload, FinalizeSaleResult } from '../services/orderService';
+import { defaultReceiptPrinter } from '../services/printer/ReceiptPrinterAdapter';
 import { 
   X, 
   CheckCircle2, 
@@ -8,7 +9,8 @@ import {
   QrCode, 
   AlertCircle,
   Loader2,
-  Trash2
+  Trash2,
+  Printer
 } from 'lucide-react';
 
 interface CheckoutModalProps {
@@ -17,6 +19,10 @@ interface CheckoutModalProps {
   totalAmount: number;
   onFinalize: (payments: PaymentPayload[]) => Promise<FinalizeSaleResult>;
   isProcessing: boolean;
+  cartItems?: any[];
+  discount?: number;
+  terminalCode?: string;
+  operatorName?: string;
 }
 
 type PaymentMethodKey = 'money' | 'credit_card' | 'debit_card' | 'pix';
@@ -34,11 +40,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   totalAmount,
   onFinalize,
   isProcessing,
+  cartItems = [],
+  discount = 0,
+  terminalCode = 'CAIXA-01',
+  operatorName = 'Operador',
 }) => {
   const [payments, setPayments] = useState<PaymentPayload[]>([]);
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodKey>('money');
   const [inputAmount, setInputAmount] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [shouldPrint, setShouldPrint] = useState<boolean>(true);
+  const [printWidth, setPrintWidth] = useState<58 | 80>(80);
 
   if (!isOpen) return null;
 
@@ -91,7 +103,39 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     try {
       setErrorMessage(null);
-      await onFinalize(payments);
+      const result = await onFinalize(payments);
+
+      // Impressão automática se selecionada (Etapas 20 e 21)
+      if (shouldPrint && result?.order_number) {
+        defaultReceiptPrinter.printReceipt({
+          orderNumber: result.order_number,
+          createdAt: new Date().toISOString(),
+          operatorName,
+          terminalCode,
+          items: cartItems.map(item => ({
+            name: item.productName,
+            saleType: item.saleType,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            subtotal: item.subtotal,
+            containerName: item.containerName,
+            grossWeight: item.grossWeight,
+            tareWeight: item.tareWeight,
+            netWeight: item.netWeight,
+            flavors: item.selectedFlavors,
+            notes: item.notes
+          })),
+          subtotal: totalAmount + discount,
+          discount: discount,
+          total: totalAmount,
+          payments: payments.map(p => ({
+            method: METHOD_LABELS[p.payment_method]?.label || p.payment_method,
+            amount: p.amount,
+            change: p.change_amount
+          }))
+        }, printWidth);
+      }
+
       onClose();
     } catch (err: any) {
       setErrorMessage(err.message || 'Falha ao concluir venda.');
@@ -254,6 +298,47 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-extrabold">
                 <span>Troco a Devolver:</span>
                 <span>R$ {change.toFixed(2).replace('.', ',')}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Opção de Impressão Térmica (Etapas 20 e 21) */}
+          <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-surface-dark flex items-center justify-between text-xs">
+            <label className="flex items-center gap-2 cursor-pointer font-bold text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={shouldPrint}
+                onChange={(e) => setShouldPrint(e.target.checked)}
+                className="size-4 rounded text-primary focus:ring-primary"
+              />
+              <Printer className="size-4 text-primary" />
+              <span>Imprimir comprovante térmico (Não fiscal)</span>
+            </label>
+
+            {shouldPrint && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPrintWidth(80)}
+                  className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors ${
+                    printWidth === 80 
+                      ? 'bg-primary text-[#0d1b14]' 
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  80mm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintWidth(58)}
+                  className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors ${
+                    printWidth === 58 
+                      ? 'bg-primary text-[#0d1b14]' 
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  58mm
+                </button>
               </div>
             )}
           </div>

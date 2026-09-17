@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import { inventoryService, InventoryStats, LowStockIngredient } from '../services/inventoryService';
 import { tubService, TubWithFlavor } from '../services/tubService';
 import { getIngredients, IngredientWithCategory } from '../services/ingredientService';
+import { ReconcileTubModal } from '../components/ReconcileTubModal';
 import { 
   Package, 
   AlertTriangle, 
@@ -31,6 +32,7 @@ const Inventory: React.FC = () => {
   const [recentMovements, setRecentMovements] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [reconcileTubTarget, setReconcileTubTarget] = useState<TubWithFlavor | null>(null);
   
   // Formulário de movimentação rápida
   const [selectedIngredientId, setSelectedIngredientId] = useState('');
@@ -339,17 +341,25 @@ const Inventory: React.FC = () => {
                       <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs text-gray-500">
                         <span>Restante: {percent.toFixed(0)}%</span>
                         {tub.status === 'in_use' && (
-                          <button
-                            onClick={async () => {
-                              if (confirm(`Deseja marcar a cuba de ${tub.product_name} como vazia?`)) {
-                                await tubService.closeTub(tub.id);
-                                await loadData();
-                              }
-                            }}
-                            className="text-red-500 hover:text-red-700 font-bold"
-                          >
-                            Finalizar Cuba
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => setReconcileTubTarget(tub)}
+                              className="text-primary hover:underline font-bold flex items-center gap-1"
+                            >
+                              ⚖ Reconciliar
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (confirm(`Deseja marcar a cuba de ${tub.product_name} como vazia?`)) {
+                                  await tubService.closeTub(tub.id);
+                                  await loadData();
+                                }
+                              }}
+                              className="text-red-500 hover:text-red-700 font-bold"
+                            >
+                              Finalizar
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -522,6 +532,17 @@ const Inventory: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Modal de Reconciliação de Cuba */}
+        <ReconcileTubModal
+          isOpen={!!reconcileTubTarget}
+          onClose={() => setReconcileTubTarget(null)}
+          tub={reconcileTubTarget}
+          onSuccess={async () => {
+            setNotification({ text: 'Cuba reconciliada com sucesso!', type: 'success' });
+            await loadData();
+          }}
+        />
 
       </div>
     </Layout>
