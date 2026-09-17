@@ -1,8 +1,12 @@
 import React, { Suspense, lazy } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 
+const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const NewOrder = lazy(() => import('./pages/NewOrder'));
+const Production = lazy(() => import('./pages/Production'));
 const Products = lazy(() => import('./pages/Products'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Reports = lazy(() => import('./pages/Reports'));
@@ -24,24 +28,137 @@ const PageLoader: React.FC = () => (
 
 const App: React.FC = () => {
   return (
-    <HashRouter>
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/pos" element={<NewOrder />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/ingredients" element={<Ingredients />} />
-          <Route path="/recipes" element={<Recipes />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/cost-analysis" element={<CostAnalysis />} />
-          <Route path="/employees" element={<Employees />} />
-          <Route path="/audit-logs" element={<AuditLogs />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Suspense>
-    </HashRouter>
+    <AuthProvider>
+      <HashRouter>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Rota Pública de Autenticação */}
+            <Route path="/login" element={<Login />} />
+
+            {/* Rotas Protegidas por Perfil */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Navigate to="/dashboard" replace />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente']}>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/pos"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente', 'Caixa']}>
+                  <NewOrder />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/production"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente', 'Produção']}>
+                  <Production />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/products"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente', 'Produção', 'Caixa']}>
+                  <Products />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/ingredients"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente', 'Produção']}>
+                  <Ingredients />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/recipes"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente', 'Produção']}>
+                  <Recipes />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/inventory"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente', 'Produção']}>
+                  <Inventory />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente']}>
+                  <Reports />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/cost-analysis"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente']}>
+                  <CostAnalysis />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/employees"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente']}>
+                  <Employees />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/audit-logs"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente']}>
+                  <AuditLogs />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute allowedRoles={['Administrador', 'Gerente']}>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Suspense>
+      </HashRouter>
+    </AuthProvider>
   );
 };
 

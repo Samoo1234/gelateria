@@ -107,6 +107,85 @@ export const productionService = {
   },
 
   /**
+   * Conclui um lote de produção de forma 100% atômica e cadastra as cubas geradas
+   */
+  async completeBatchWithTubs(params: {
+    batchId: string;
+    batchCode: string;
+    recipeId: string;
+    productId?: string | null;
+    producedQuantity: number;
+    lossQuantity: number;
+    employeeId: string;
+    tubsCount: number;
+    tubCapacityKg?: number;
+    notes?: string;
+  }) {
+    // 1. Executa a RPC de baixa atômica de ingredientes e registro de perda
+    const rpcResult = await this.completeBatch(
+      params.batchId,
+      params.producedQuantity,
+      params.lossQuantity,
+      params.employeeId,
+      params.notes
+    );
+
+    // 2. Se especificado número de cubas a gerar, insere na tabela tubs
+    if (params.tubsCount > 0 && params.productId) {
+      const weightPerTub = Number((params.producedQuantity / params.tubsCount).toFixed(3));
+      const newTubs = Array.from({ length: params.tubsCount }).map((_, idx) => ({
+        code: `CB-${params.batchCode.replace('LOTE-', '')}-${idx + 1}`,
+        batch_id: params.batchId,
+        flavor_product_id: params.productId,
+        capacity_kg: params.tubCapacityKg || weightPerTub,
+        current_weight_kg: weightPerTub,
+        status: 'COLD_STORAGE', // Em câmara fria aguardando ir para a vitrine
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error: tubError } = await supabase.from('tubs').insert(newTubs);
+      if (tubError) {
+        console.error('Erro ao gerar cubas da batelada:', tubError);
+      }
+    }
+
+    return rpcResult;
+  },
+
+  /**
+   * Busca receitas com ingredientes para planejamento de produção
+   */
+  async getRecipesForProduction() {
+    const { data, error } = await supabase
+      .from('recipes')
+      .select(`
+        id,
+        product_id,
+        yield,
+        prep_time,
+        total_cost,
+        products:product_id(id, name, category, price, image_url),
+        recipe_items:recipe_items(
+          id,
+          ingredient_id,
+          quantity,
+          unit,
+          cost,
+          ingredients:ingredient_id(id, name, unit, current_stock, minimum_stock, cost_per_unit)
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro ao buscar receitas para produção:', error);
+      return [];
+    }
+
+    return data || [];
+  },
+
+  /**
    * Conclui um lote de produção de forma 100% atômica (Etapa 7).
    * Consome os ingredientes da receita proporcionalmente no estoque,
    * registra perdas se houver e gera log de auditoria.
