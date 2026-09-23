@@ -6,7 +6,8 @@ import { auditService } from '../services/auditService';
 import {
   calculateFormulation,
   diagnoseRecipe,
-  formatPtBrStock
+  formatPtBrStock,
+  extractTechnicalProfile
 } from '../services/formulationEngine';
 import {
   FormulationIngredientItem,
@@ -67,7 +68,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
     }
 
     const formulationItems: FormulationIngredientItem[] = selectedRecipe.recipe_items.map((it: any) => {
-      const profile = it.ingredients?.ingredient_technical_profiles?.[0] || null;
+      const profile = extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles);
       return {
         ingredientId: it.ingredient_id,
         ingredientName: it.ingredients?.name || 'Ingrediente',
@@ -98,15 +99,23 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
     return { metrics: m, diagnostics: diag, realBaseMassKg: calculatedMassKg };
   }, [selectedRecipe]);
 
-  // Escala efetiva baseada na massa REAL validada dos insumos da receita
-  const scaleRatio = plannedQuantity > 0 && realBaseMassKg > 0 ? plannedQuantity / realBaseMassKg : 1;
+  // Se houver erro de dados técnicos (ex: falta de ficha técnica ou densidade de líquido), a batelada é terminantemente bloqueada
+  const hasDataError = Boolean(
+    !metrics ||
+    metrics.hasDataError ||
+    !metrics.isCalculationComplete ||
+    (metrics.dataErrors && metrics.dataErrors.length > 0)
+  );
 
-  // Verificação de desvios técnicos em relação às tolerâncias
+  // Escala efetiva baseada na massa REAL validada dos insumos da receita
+  const scaleRatio = !hasDataError && plannedQuantity > 0 && realBaseMassKg > 0 ? plannedQuantity / realBaseMassKg : 1;
+
+  // Verificação de desvios técnicos em relação às tolerâncias (apenas desvios mensuráveis)
   const outOfBoundsDiagnostics = useMemo(() => {
-    return diagnostics.filter((d) => d.status === 'OUT_OF_BOUNDS' || d.status === 'PENDING');
+    return diagnostics.filter((d) => d.status === 'OUT_OF_BOUNDS');
   }, [diagnostics]);
 
-  const hasTechnicalDeviations = outOfBoundsDiagnostics.length > 0 || (metrics && !metrics.isBalanced);
+  const hasTechnicalDeviations = outOfBoundsDiagnostics.length > 0 || (metrics && !metrics.isBalanced && !hasDataError);
 
   // Verifica se todos os ingredientes possuem estoque suficiente na proporção real
   const ingredientStatus = (selectedRecipe?.recipe_items || []).map((item: any) => {
@@ -136,7 +145,13 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
       return;
     }
 
-    // Se houver desvio técnico, exige autorização explícita
+    // Bloqueio irrestrito quando faltarem dados cadastrais (erro de dados não contornável)
+    if (hasDataError) {
+      setError(`Bloqueio de produção: a fórmula possui dados incompletos (${metrics?.dataErrors?.join(', ') || 'densidade ou ficha técnica ausente'}). Não é permitido iniciar batelada com dados desconhecidos.`);
+      return;
+    }
+
+    // Se houver desvio técnico mensurável, exige autorização explícita com PIN gerencial
     let authorizedByEmployeeId: string | null = null;
     if (hasTechnicalDeviations) {
       if (!authorizeDeviation) {
@@ -401,8 +416,32 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
             </div>
           )}
 
-          {/* Autorização Obrigatória de Desvio Técnico */}
-          {hasTechnicalDeviations && (
+          {/* Bloqueio Explícito por Erro de Dados Técnicos Incompletos */}
+          {hasDataError && (
+            <div className="p-4 rounded-2xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/40 space-y-2">
+              <div className="flex items-start gap-2.5 text-xs text-red-800 dark:text-red-300">
+                <span className="material-symbols-outlined text-lg mt-0.5 text-red-600 dark:text-red-400">
+                  block
+                </span>
+                <div>
+                  <p className="font-bold text-sm">Bloqueio de Produção: Dados Técnicos Incompletos</p>
+                  <p className="mt-0.5 opacity-90">
+                    Não é permitido escalar nem iniciar a produção desta fórmula porque existem erros de dados (ficha técnica ou densidade necessária ausente). Erros de dados não podem ser liberados por autorização excepcional de desvio.
+                  </p>
+                  {metrics?.dataErrors && metrics.dataErrors.length > 0 && (
+                    <ul className="list-disc list-inside mt-2 space-y-1 font-mono text-[11px]">
+                      {metrics.dataErrors.map((err, eIdx) => (
+                        <li key={eIdx}>{err}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Autorização Obrigatória de Desvio Técnico (Válida SOMENTE para desvio mensurável com dados completos) */}
+          {hasTechnicalDeviations && !hasDataError && (
             <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 space-y-3">
               <div className="flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-300">
                 <span className="material-symbols-outlined text-lg mt-0.5 text-amber-600 dark:text-amber-400">
@@ -546,7 +585,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
             </button>
             <button
               type="submit"
-              disabled={loading || recipes.length === 0 || (hasTechnicalDeviations && (!authorizeDeviation || !managerPin.trim() || !deviationReason.trim()))}
+              disabled={loading || recipes.length === 0 || hasDataError || (hasTechnicalDeviations && (!authorizeDeviation || !managerPin.trim() || !deviationReason.trim()))}
               className="px-6 py-2.5 rounded-xl bg-primary text-gray-900 dark:text-black text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2 shadow-sm"
             >
               {loading ? (

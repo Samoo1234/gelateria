@@ -7,7 +7,8 @@ import { useProducts } from '../hooks/useProducts';
 import {
     formatPtBrStock,
     calculateFormulation,
-    diagnoseRecipe
+    diagnoseRecipe,
+    extractTechnicalProfile
 } from '../services/formulationEngine';
 import {
     FormulationIngredientItem,
@@ -23,7 +24,7 @@ const getManufacturingMetricsAndDiagnostics = (recipe: any) => {
         unit: it.unit,
         costPerUnit: Number(it.ingredients?.cost_per_unit || 0),
         isClosingIngredient: it.is_closing_ingredient,
-        profile: it.ingredients?.ingredient_technical_profiles?.[0] || null
+        profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
     }));
 
     const targetWeightG = Number(recipe.target_weight_g || 10000);
@@ -232,7 +233,11 @@ const Recipes: React.FC = () => {
                                 const isExpanded = expandedRecipe === recipe.id;
                                 const isManufacturing = recipe.recipe_type === 'MANUFACTURING';
                                 const yieldKg = Number(recipe.yield || (isManufacturing ? 10 : 1));
-                                const costPerKg = isManufacturing && yieldKg > 0 ? (recipe.total_cost || 0) / yieldKg : 0;
+                                const analysis = isManufacturing ? getManufacturingMetricsAndDiagnostics(recipe) : null;
+                                const calculatedMassKg = isManufacturing && analysis?.metrics && analysis.metrics.totalMassG > 0
+                                    ? analysis.metrics.totalMassG / 1000
+                                    : yieldKg;
+                                const costPerKg = isManufacturing && calculatedMassKg > 0 ? (recipe.total_cost || 0) / calculatedMassKg : 0;
                                 const margin = product ? calculateMargin(recipe.total_cost || 0, product.price) : 0;
 
                                 return (
@@ -301,7 +306,9 @@ const Recipes: React.FC = () => {
                                                                 </p>
                                                             </div>
                                                             <div className="text-right">
-                                                                <p className="text-[11px] text-primary uppercase font-semibold">Custo / kg</p>
+                                                                <p className="text-[11px] text-primary uppercase font-semibold">
+                                                                    Custo / kg {isManufacturing && calculatedMassKg > 0 ? `(massa real: ${formatPtBrStock(calculatedMassKg, 'kg', true)})` : ''}
+                                                                </p>
                                                                 <p className="text-xl font-black text-primary font-mono">
                                                                     {formatCurrency(costPerKg)}/kg
                                                                 </p>
@@ -364,6 +371,15 @@ const Recipes: React.FC = () => {
                                                                     <span className="text-gray-500">Massa Alvo Planejada:</span>
                                                                     <strong className="font-mono text-gray-700 dark:text-gray-300">
                                                                         {formatPtBrStock((recipe.target_weight_g || 10000) / 1000, 'kg', true)}
+                                                                    </strong>
+                                                                </div>
+                                                                <div className="flex items-center gap-2 font-mono text-xs">
+                                                                    <span className="text-gray-500">Desvio Real:</span>
+                                                                    <strong className={`font-bold ${
+                                                                        metrics.isBalanced ? 'text-emerald-600' : 'text-amber-600 dark:text-amber-400'
+                                                                    }`}>
+                                                                        {metrics.totalMassG >= (recipe.target_weight_g || 10000) ? '+' : ''}
+                                                                        {((metrics.totalMassG - (recipe.target_weight_g || 10000)) / 1000).toFixed(3).replace('.', ',')} kg
                                                                     </strong>
                                                                 </div>
                                                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -460,7 +476,7 @@ const Recipes: React.FC = () => {
                                                                             </span>
                                                                         )}
                                                                         {isManufacturing && (() => {
-                                                                            const profile = item.ingredients?.ingredient_technical_profiles?.[0];
+                                                                            const profile = extractTechnicalProfile(item.ingredients?.ingredient_technical_profiles);
                                                                             const status = profile?.data_status;
                                                                             if (status === 'CONFIRMED') {
                                                                                 return (

@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase';
+import { calculateFormulation, extractTechnicalProfile } from './formulationEngine';
+import { FormulationIngredientItem } from '../types';
 
 export interface ProductionBatchRow {
   id: string;
@@ -90,6 +92,77 @@ export const productionService = {
       reason?: string | null;
     }
   ): Promise<ProductionBatchRow> {
+    if (plannedQuantity <= 0) {
+      throw new Error('A quantidade planejada deve ser maior que zero.');
+    }
+
+    // 1. Busca os detalhes da receita e seus perfis técnicos para validação estrita
+    const { data: recipe, error: recipeErr } = await supabase
+      .from('recipes')
+      .select(`
+        id,
+        name,
+        recipe_type,
+        target_weight_g,
+        target_fat_pct,
+        fat_tolerance_pct,
+        recipe_items(
+          id,
+          quantity,
+          unit,
+          is_closing_ingredient,
+          ingredients:ingredient_id(
+            id,
+            name,
+            cost_per_unit,
+            ingredient_technical_profiles(*)
+          )
+        )
+      `)
+      .eq('id', recipeId)
+      .single();
+
+    if (recipeErr || !recipe) {
+      throw new Error('Receita não encontrada para iniciar lote de produção.');
+    }
+
+    // 2. Se for fórmula de fabricação (MANUFACTURING), aplica o motor central de formulação técnica
+    if (recipe.recipe_type === 'MANUFACTURING') {
+      const items: FormulationIngredientItem[] = (recipe.recipe_items || []).map((it: any) => ({
+        ingredientId: it.ingredients?.id,
+        ingredientName: it.ingredients?.name || 'Ingrediente',
+        quantity: Number(it.quantity || 0),
+        unit: it.unit,
+        costPerUnit: Number(it.ingredients?.cost_per_unit || 0),
+        isClosingIngredient: it.is_closing_ingredient,
+        profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
+      }));
+
+      const targetG = Number(recipe.target_weight_g || 10000);
+      const metrics = calculateFormulation(items, targetG);
+
+      // Bloqueio incondicional por erro de dados técnicos (ficha ou densidade ausente)
+      if (metrics.hasDataError) {
+        throw new Error(
+          `Não é permitido iniciar batelada: dados técnicos da fórmula incompletos (${metrics.dataErrors?.join('; ')}). Erros de dados cadastrais não podem ser contornados por autorização excepcional.`
+        );
+      }
+
+      // Validação de desvio técnico mensurável de tolerância
+      const isOutOfTolerance = !metrics.isBalanced;
+      if (isOutOfTolerance) {
+        if (!deviationDetails?.authorized) {
+          throw new Error('A fórmula possui desvio técnico fora da tolerância e exige autorização gerencial com justificativa.');
+        }
+        if (!deviationDetails.authorizedBy) {
+          throw new Error('Autorização de desvio requer a identificação do responsável (Gerente/Admin).');
+        }
+        if (!deviationDetails.reason || !deviationDetails.reason.trim()) {
+          throw new Error('Autorização de desvio requer justificativa técnica obrigatória.');
+        }
+      }
+    }
+
     const batchCode = `LOTE-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const { data, error } = await supabase

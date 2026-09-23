@@ -4,8 +4,24 @@ import {
   FormulationCalculatedMetrics,
   FormulationTargets,
   TargetDiagnostic,
-  PricingMetrics
+  PricingMetrics,
+  IngredientTechnicalProfile
 } from '../types';
+
+/**
+ * Normaliza e extrai de forma resiliente a ficha técnica do ingrediente,
+ * suportando tanto objeto { ... } quanto array [ { ... } ] retornados pelo PostgREST Supabase.
+ */
+export function extractTechnicalProfile(raw: any): IngredientTechnicalProfile | null {
+  if (!raw) return null;
+  if (Array.isArray(raw)) {
+    return raw.length > 0 && raw[0] ? (raw[0] as IngredientTechnicalProfile) : null;
+  }
+  if (typeof raw === 'object') {
+    return raw as IngredientTechnicalProfile;
+  }
+  return null;
+}
 
 /**
  * Converte qualquer quantidade e unidade para gramas internamente com validação estrita.
@@ -30,7 +46,7 @@ export function normalizeMassInGrams(
       if (!densityGPerMl || densityGPerMl <= 0) {
         return {
           grams: 0,
-          error: 'Conversão de ml para gramas requer densidade válida (g/ml).',
+          error: 'Conversão de mililitros (ml) para massa requer densidade válida (> 0).',
           isPending: true
         };
       }
@@ -40,7 +56,7 @@ export function normalizeMassInGrams(
       if (!densityGPerMl || densityGPerMl <= 0) {
         return {
           grams: 0,
-          error: 'Conversão de Litros (L) para gramas requer densidade válida (g/ml).',
+          error: 'Conversão de Litros (L) para massa requer densidade válida (> 0).',
           isPending: true
         };
       }
@@ -58,7 +74,7 @@ export function normalizeMassInGrams(
 
 /**
  * Converte gramas para a unidade de exibição original do ingrediente.
- * Para volumes (L e ml), exige densidade válida.
+ * Para volumes (L e ml), exige densidade estritamente válida sem fallback implícito.
  */
 export function convertGramsToUnit(
   grams: number,
@@ -71,12 +87,16 @@ export function convertGramsToUnit(
     case 'kg':
       return Number((grams / 1000).toFixed(3));
     case 'ml': {
-      const d = densityGPerMl && densityGPerMl > 0 ? densityGPerMl : 1.0;
-      return Number((grams / d).toFixed(3));
+      if (!densityGPerMl || densityGPerMl <= 0) {
+        throw new Error('Conversão de gramas para mililitros (ml) requer densidade válida (> 0).');
+      }
+      return Number((grams / densityGPerMl).toFixed(3));
     }
     case 'L': {
-      const d = densityGPerMl && densityGPerMl > 0 ? densityGPerMl : 1.0;
-      return Number((grams / (1000 * d)).toFixed(6));
+      if (!densityGPerMl || densityGPerMl <= 0) {
+        throw new Error('Conversão de gramas para Litros (L) requer densidade válida (> 0).');
+      }
+      return Number((grams / (1000 * densityGPerMl)).toFixed(6));
     }
     case 'un':
       return Math.round(grams);
@@ -93,7 +113,7 @@ export function convertGramsToUnit(
  * 3. Lactose é componente dos sólidos não-gordurosos do leite (ESDL) e NÃO é somada em duplicidade nos sólidos totais.
  * 4. PAC da lactose é calculado estritamente sobre a MASSA DE LACTOSE (massa * lactose_pct * fator_lactose),
  *    jamais sobre a massa inteira do leite líquido!
- * 5. Se faltar densidade ou fatores críticos, o cálculo é marcado como PENDENTE.
+ * 5. Se faltar densidade ou fatores críticos, o cálculo é marcado com erro explícito de dados.
  */
 export function calculateFormulation(
   items: FormulationIngredientItem[],
@@ -112,20 +132,36 @@ export function calculateFormulation(
   let costTotal = 0;
 
   const missingFactors: { ingredientName: string; missingProperties: string[] }[] = [];
+  const dataErrors: string[] = [];
 
   for (const item of items) {
+    // Normaliza o perfil técnico caso venha encapsulado
+    const prof = extractTechnicalProfile(item.profile);
+
     // Itens que não entram no mix (ex: casquinha, copo, colher, palito) são desconsiderados na composição física da calda
-    if (item.profile && item.profile.is_mix_ingredient === false) {
+    if (prof && prof.is_mix_ingredient === false) {
+      continue;
+    }
+
+    if (!prof) {
+      const err = `Ficha técnica ausente para o ingrediente "${item.ingredientName}".`;
+      dataErrors.push(err);
+      missingFactors.push({
+        ingredientName: item.ingredientName,
+        missingProperties: ['Ficha técnica completa não cadastrada ou não vinculada']
+      });
       continue;
     }
 
     const isLiquid = item.unit === 'L' || item.unit === 'ml';
-    const density = item.profile?.density_g_ml;
+    const density = prof.density_g_ml;
 
     if (isLiquid && (!density || density <= 0)) {
+      const err = `Densidade ausente ou inválida para o líquido "${item.ingredientName}". Conversão para massa bloqueada.`;
+      dataErrors.push(err);
       missingFactors.push({
         ingredientName: item.ingredientName,
-        missingProperties: ['Densidade ausente para conversão de volume (L/ml) em massa (g)']
+        missingProperties: ['Densidade ausente ou inválida para conversão de volume (L/ml) em massa (g)']
       });
       continue;
     }
@@ -133,12 +169,12 @@ export function calculateFormulation(
     const { grams, error, isPending } = normalizeMassInGrams(item.quantity, item.unit, density);
 
     if (error || isPending || grams <= 0) {
-      if (isPending) {
-        missingFactors.push({
-          ingredientName: item.ingredientName,
-          missingProperties: [error || 'Conversão pendente']
-        });
-      }
+      const err = `Quantidade ou conversão inválida para "${item.ingredientName}": ${error || 'Massa menor ou igual a zero.'}`;
+      dataErrors.push(err);
+      missingFactors.push({
+        ingredientName: item.ingredientName,
+        missingProperties: [error || 'Conversão pendente']
+      });
       continue;
     }
 
@@ -157,16 +193,7 @@ export function calculateFormulation(
     }
     costTotal += itemCost;
 
-    const prof = item.profile;
     const missing: string[] = [];
-
-    if (!prof) {
-      missingFactors.push({
-        ingredientName: item.ingredientName,
-        missingProperties: ['Perfil técnico completo não cadastrado']
-      });
-      continue;
-    }
 
     if (prof.data_status === 'MISSING') {
       missing.push('Propriedades físico-químicas marcadas como ausentes');
@@ -256,10 +283,13 @@ export function calculateFormulation(
   const pod = totalMassG > 0 ? (100 / totalMassG) * weightedPodSum : 0;
   const pac = totalMassG > 0 ? (100 / totalMassG) * weightedPacSum : 0;
 
-  const costPerKg = totalMassG > 0 ? (costTotal / totalMassG) * 1000 : 0;
+  // Custo por kg calculado sobre a MASSA REAL EFETIVA dos ingredientes da fórmula (massa total em kg = totalMassG / 1000)
+  const costPerKg = totalMassG > 0 ? (costTotal / (totalMassG / 1000)) : 0;
 
-  const hasPendingFactors = missingFactors.length > 0;
-  const isBalanced = Math.abs(totalMassG - targetWeightG) <= 5 && !hasPendingFactors;
+  const hasDataError = dataErrors.length > 0;
+  const hasPendingFactors = missingFactors.length > 0 || hasDataError;
+  const isCalculationComplete = !hasDataError;
+  const isBalanced = isCalculationComplete && Math.abs(totalMassG - targetWeightG) <= 5 && !hasPendingFactors;
 
   return {
     totalMassG: Number(totalMassG.toFixed(3)),
@@ -278,8 +308,11 @@ export function calculateFormulation(
     costPerKg: Number(costPerKg.toFixed(2)),
     missingFactors,
     isBalanced,
-    isProductionEligible: isBalanced && !hasPendingFactors,
-    hasPendingFactors
+    isProductionEligible: isBalanced && !hasPendingFactors && !hasDataError,
+    hasPendingFactors,
+    hasDataError,
+    dataErrors,
+    isCalculationComplete
   };
 }
 

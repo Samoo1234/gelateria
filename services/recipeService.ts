@@ -56,7 +56,7 @@ export async function getRecipeById(id: string) {
       products(name, price, image_url),
       recipe_items(
         *,
-        ingredients(name, unit, cost_per_unit)
+        ingredients(id, name, unit, cost_per_unit, ingredient_technical_profiles(*))
       )
     `)
         .eq('id', id)

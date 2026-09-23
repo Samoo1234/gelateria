@@ -144,6 +144,9 @@ export interface FormulationCalculatedMetrics {
   isBalanced: boolean;
   isProductionEligible: boolean;
   hasPendingFactors: boolean;
+  hasDataError?: boolean;
+  dataErrors?: string[];
+  isCalculationComplete?: boolean;
 }
 
 export interface FormulationTargets {
