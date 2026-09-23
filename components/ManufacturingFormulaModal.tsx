@@ -209,6 +209,7 @@ export const ManufacturingFormulaModal: React.FC<ManufacturingFormulaModalProps>
         prepTime: prepTimeMinutes,
         totalCost: metrics.costTotal,
         targetWeightG,
+        actualMassG: metrics.totalMassG,
         targetFatPct: targetFat,
         targetMsnfPct: targetMsnf,
         targetSugarPct: targetSugar,

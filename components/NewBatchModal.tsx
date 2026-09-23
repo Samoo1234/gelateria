@@ -1,7 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { supabase } from '../lib/supabase';
 import { productionService } from '../services/productionService';
 import { useAuth } from '../contexts/AuthContext';
-import { formatPtBrStock } from '../services/formulationEngine';
+import { auditService } from '../services/auditService';
+import {
+  calculateFormulation,
+  diagnoseRecipe,
+  formatPtBrStock
+} from '../services/formulationEngine';
+import {
+  FormulationIngredientItem,
+  FormulationTargets,
+  TargetDiagnostic
+} from '../types';
 
 interface NewBatchModalProps {
   isOpen: boolean;
@@ -13,11 +24,16 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
   const { user } = useAuth();
   const [recipes, setRecipes] = useState<any[]>([]);
   const [selectedRecipeId, setSelectedRecipeId] = useState<string>('');
-  const [plannedQuantity, setPlannedQuantity] = useState<number>(5);
+  const [plannedQuantity, setPlannedQuantity] = useState<number>(10);
   const [notes, setNotes] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [fetchingRecipes, setFetchingRecipes] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Estados para autorização explícita de desvio técnico
+  const [authorizeDeviation, setAuthorizeDeviation] = useState(false);
+  const [managerPin, setManagerPin] = useState('');
+  const [deviationReason, setDeviationReason] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -33,7 +49,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
       setRecipes(data);
       if (data.length > 0) {
         setSelectedRecipeId(data[0].id);
-        setPlannedQuantity(Number(data[0].yield || 5));
+        setPlannedQuantity(Number(data[0].yield || 10));
       }
     } catch (err: any) {
       setError(err.message || 'Erro ao carregar receitas.');
@@ -42,13 +58,57 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
     }
   };
 
-  if (!isOpen) return null;
-
   const selectedRecipe = recipes.find((r) => r.id === selectedRecipeId);
-  const baseYield = Number(selectedRecipe?.yield || 1);
-  const scaleRatio = plannedQuantity > 0 && baseYield > 0 ? plannedQuantity / baseYield : 1;
 
-  // Verifica se todos os ingredientes possuem estoque suficiente
+  // Análise técnico-química da fórmula selecionada em tempo de execução
+  const { metrics, diagnostics, realBaseMassKg } = useMemo(() => {
+    if (!selectedRecipe || !selectedRecipe.recipe_items) {
+      return { metrics: null, diagnostics: [] as TargetDiagnostic[], realBaseMassKg: 10 };
+    }
+
+    const formulationItems: FormulationIngredientItem[] = selectedRecipe.recipe_items.map((it: any) => {
+      const profile = it.ingredients?.ingredient_technical_profiles?.[0] || null;
+      return {
+        ingredientId: it.ingredient_id,
+        ingredientName: it.ingredients?.name || 'Ingrediente',
+        quantity: Number(it.quantity || 0),
+        unit: it.unit,
+        costPerUnit: Number(it.ingredients?.cost_per_unit || 0),
+        isClosingIngredient: it.is_closing_ingredient,
+        profile
+      };
+    });
+
+    const targetG = Number(selectedRecipe.target_weight_g || 10000);
+    const m = calculateFormulation(formulationItems, targetG);
+
+    const targets: FormulationTargets = {
+      targetWeightG: targetG,
+      fatPct: selectedRecipe.target_fat_pct ? { target: Number(selectedRecipe.target_fat_pct), tolerance: Number(selectedRecipe.fat_tolerance_pct || 1.0) } : undefined,
+      msnfPct: selectedRecipe.target_msnf_pct ? { target: Number(selectedRecipe.target_msnf_pct), tolerance: Number(selectedRecipe.msnf_tolerance_pct || 1.0) } : undefined,
+      sugarPct: selectedRecipe.target_sugar_pct ? { target: Number(selectedRecipe.target_sugar_pct), tolerance: Number(selectedRecipe.sugar_tolerance_pct || 1.5) } : undefined,
+      totalSolidsPct: selectedRecipe.target_total_solids_pct ? { target: Number(selectedRecipe.target_total_solids_pct), tolerance: Number(selectedRecipe.solids_tolerance_pct || 2.0) } : undefined,
+      pod: selectedRecipe.target_pod ? { target: Number(selectedRecipe.target_pod), tolerance: Number(selectedRecipe.pod_tolerance || 1.5) } : undefined,
+      pac: selectedRecipe.target_pac ? { target: Number(selectedRecipe.target_pac), tolerance: Number(selectedRecipe.pac_tolerance || 2.0) } : undefined,
+    };
+
+    const diag = diagnoseRecipe(m, targets);
+    const calculatedMassKg = m.totalMassG > 0 ? Number((m.totalMassG / 1000).toFixed(3)) : Number(selectedRecipe.yield || 10);
+
+    return { metrics: m, diagnostics: diag, realBaseMassKg: calculatedMassKg };
+  }, [selectedRecipe]);
+
+  // Escala efetiva baseada na massa REAL validada dos insumos da receita
+  const scaleRatio = plannedQuantity > 0 && realBaseMassKg > 0 ? plannedQuantity / realBaseMassKg : 1;
+
+  // Verificação de desvios técnicos em relação às tolerâncias
+  const outOfBoundsDiagnostics = useMemo(() => {
+    return diagnostics.filter((d) => d.status === 'OUT_OF_BOUNDS' || d.status === 'PENDING');
+  }, [diagnostics]);
+
+  const hasTechnicalDeviations = outOfBoundsDiagnostics.length > 0 || (metrics && !metrics.isBalanced);
+
+  // Verifica se todos os ingredientes possuem estoque suficiente na proporção real
   const ingredientStatus = (selectedRecipe?.recipe_items || []).map((item: any) => {
     const required = Number((item.quantity * scaleRatio).toFixed(3));
     const current = Number(item.ingredients?.current_stock || 0);
@@ -63,6 +123,8 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
 
   const allIngredientsAvailable = ingredientStatus.every((i: any) => i.hasStock);
 
+  if (!isOpen) return null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRecipeId) {
@@ -74,15 +136,93 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
       return;
     }
 
+    // Se houver desvio técnico, exige autorização explícita
+    let authorizedByEmployeeId: string | null = null;
+    if (hasTechnicalDeviations) {
+      if (!authorizeDeviation) {
+        setError('Esta fórmula possui desvios técnicos fora das tolerâncias. Para prosseguir, marque a autorização de desvio.');
+        return;
+      }
+      if (!deviationReason.trim()) {
+        setError('Informe a justificativa técnica obrigatória para autorizar a produção com desvio.');
+        return;
+      }
+      if (!managerPin.trim()) {
+        setError('Informe o PIN de Gerente/Administrador para autorizar o lote.');
+        return;
+      }
+
+      // Validar PIN gerencial na tabela employees
+      try {
+        const { data: authEmployee, error: authError } = await supabase
+          .from('employees')
+          .select('id, name, role, status')
+          .eq('pin_code', managerPin.trim())
+          .eq('status', 'Active')
+          .single();
+
+        if (authError || !authEmployee) {
+          setError('PIN gerencial incorreto ou colaborador inativo.');
+          return;
+        }
+
+        const roleLower = (authEmployee.role || '').toLowerCase();
+        const isManagerOrAdmin = roleLower.includes('admin') || roleLower.includes('gerente');
+        if (!isManagerOrAdmin) {
+          setError('Apenas Gerentes ou Administradores podem autorizar bateladas fora da tolerância técnica.');
+          return;
+        }
+        authorizedByEmployeeId = authEmployee.id;
+      } catch (authErr: any) {
+        setError(authErr.message || 'Falha ao validar PIN gerencial.');
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     try {
-      await productionService.createBatch(
+      const deviationDetails = hasTechnicalDeviations
+        ? {
+            authorized: true,
+            authorizedBy: authorizedByEmployeeId,
+            reason: deviationReason.trim()
+          }
+        : undefined;
+
+      const created = await productionService.createBatch(
         selectedRecipeId,
         plannedQuantity,
         user?.id,
-        notes || `Batelada iniciada por ${user?.name || 'Operador'}`
+        notes || `Batelada iniciada por ${user?.name || 'Operador'}`,
+        deviationDetails
       );
+
+      // Registrar evento de segurança e auditoria se houve autorização de desvio
+      if (hasTechnicalDeviations && authorizedByEmployeeId) {
+        await auditService.logSecurityEvent(
+          'PRODUCTION_DEVIATION_AUTHORIZED',
+          'production_batches',
+          created.id,
+          {
+            recipeId: selectedRecipeId,
+            recipeName: selectedRecipe?.name,
+            plannedQuantity,
+            realBaseMassKg,
+            deviations: outOfBoundsDiagnostics.map((d) => ({
+              parameter: d.parameter,
+              target: d.target,
+              actual: d.actual,
+              deviation: d.deviation,
+              tolerance: d.tolerance
+            })),
+            reason: deviationReason.trim(),
+            authorizedBy: authorizedByEmployeeId
+          },
+          authorizedByEmployeeId
+        );
+      }
+
       onCreated();
       onClose();
     } catch (err: any) {
@@ -93,8 +233,8 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-2xl rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-white/10 p-6 sm:p-8 shadow-2xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in overflow-y-auto">
+      <div className="relative w-full max-w-2xl rounded-3xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-white/10 p-6 sm:p-8 shadow-2xl my-6 max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/5">
           <div className="flex items-center gap-3">
@@ -106,7 +246,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
                 Nova Ordem de Produção
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Inicie uma nova batelada de fabricação com reserva de matéria-prima
+                Inicie uma nova batelada de fábrica com escala física real e validação de tolerâncias
               </p>
             </div>
           </div>
@@ -119,7 +259,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
         </div>
 
         {error && (
-          <div className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 flex items-center gap-2 text-red-600 dark:text-red-400 text-xs">
+          <div className="mt-4 p-3.5 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 flex items-center gap-2 text-red-600 dark:text-red-400 text-xs">
             <span className="material-symbols-outlined text-base">error</span>
             <span>{error}</span>
           </div>
@@ -130,7 +270,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                Receita / Sabor do Gelato
+                Fórmula de Fabricação Elegível
               </label>
               {fetchingRecipes ? (
                 <div className="h-11 flex items-center text-xs text-gray-500">
@@ -147,12 +287,15 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
                     setSelectedRecipeId(e.target.value);
                     const r = recipes.find((x) => x.id === e.target.value);
                     if (r) setPlannedQuantity(Number(r.yield || 10));
+                    setAuthorizeDeviation(false);
+                    setManagerPin('');
+                    setDeviationReason('');
                   }}
                   className="w-full h-11 px-3 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
                 >
                   {recipes.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.displayName || r.name || r.products?.name || 'Fórmula sem nome'} ({r.yield || 10} kg padrão)
+                      {r.displayName || r.name || 'Fórmula sem nome'}
                     </option>
                   ))}
                 </select>
@@ -161,14 +304,14 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
 
             <div>
               <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                Volume Planejado (kg)
+                Volume Planejado da Batelada (kg)
               </label>
               <div className="relative">
                 <input
                   type="number"
-                  step="0.1"
+                  step="0.01"
                   min="0.5"
-                  max="100"
+                  max="500"
                   value={plannedQuantity}
                   onChange={(e) => setPlannedQuantity(Number(e.target.value))}
                   className="w-full h-11 pl-3 pr-10 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white font-bold focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
@@ -181,11 +324,151 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
             </div>
           </div>
 
+          {/* Painel de Validação Física: Massa Base vs Volume Planejado */}
+          <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 text-xs space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-gray-500 dark:text-gray-400">
+                Massa Real da Composição Base:
+              </span>
+              <strong className="font-mono text-gray-900 dark:text-white">
+                {formatPtBrStock(realBaseMassKg, 'kg', true)}
+              </strong>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-gray-500 dark:text-gray-400">
+                Fator de Escala Aplicado:
+              </span>
+              <strong className="font-mono text-primary font-bold">
+                {scaleRatio.toFixed(3)}x ({plannedQuantity} kg / {realBaseMassKg.toFixed(3)} kg)
+              </strong>
+            </div>
+          </div>
+
+          {/* Diagnóstico de Tolerâncias Técnicas */}
+          {diagnostics.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  Diagnóstico Físico-Químico da Calda
+                </h4>
+                <span
+                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                    !hasTechnicalDeviations
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                  }`}
+                >
+                  {!hasTechnicalDeviations ? '✓ Fórmula Calibrada' : '⚠️ Fora da Tolerância'}
+                </span>
+              </div>
+
+              <div className="border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden divide-y divide-gray-100 dark:divide-white/5 bg-gray-50/50 dark:bg-black/10">
+                {diagnostics.map((d, idx) => (
+                  <div key={idx} className="p-2.5 flex items-center justify-between text-xs">
+                    <span className="font-medium text-gray-800 dark:text-gray-200">
+                      {d.parameter}
+                    </span>
+                    <div className="flex items-center gap-3 font-mono">
+                      <span className="text-gray-400 text-[11px]">
+                        Meta: {d.target} (±{d.tolerance})
+                      </span>
+                      <strong className="text-gray-900 dark:text-white">
+                        Real: {d.actual}
+                      </strong>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          d.status === 'OPTIMAL'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                            : d.status === 'ACCEPTABLE'
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                            : d.status === 'PENDING'
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                        }`}
+                      >
+                        {d.status === 'OPTIMAL'
+                          ? 'Excelente'
+                          : d.status === 'ACCEPTABLE'
+                          ? 'Tolerável'
+                          : d.status === 'PENDING'
+                          ? 'Pendente'
+                          : `Desvio (${d.deviation > 0 ? '+' : ''}${d.deviation})`}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Autorização Obrigatória de Desvio Técnico */}
+          {hasTechnicalDeviations && (
+            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 space-y-3">
+              <div className="flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-300">
+                <span className="material-symbols-outlined text-lg mt-0.5 text-amber-600 dark:text-amber-400">
+                  warning
+                </span>
+                <div>
+                  <p className="font-bold text-sm">Liberação Controlada de Batelada com Desvio</p>
+                  <p className="mt-0.5 opacity-90">
+                    A fórmula selecionada possui parâmetros fora das especificações (ex: teor de gordura ou balanço de massa). Para liberar a pesagem e fabricação, é obrigatória a autorização de um Gerente ou Administrador, com registro no log de auditoria.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-amber-200 dark:border-amber-800/30 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={authorizeDeviation}
+                    onChange={(e) => setAuthorizeDeviation(e.target.checked)}
+                    className="size-4 rounded text-primary focus:ring-primary border-gray-300"
+                  />
+                  <span className="text-xs font-bold text-gray-900 dark:text-white">
+                    Autorizar início de batelada com desvio técnico excepcional
+                  </span>
+                </label>
+
+                {authorizeDeviation && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        PIN de Autorização (Gerente / Admin) *
+                      </label>
+                      <input
+                        type="password"
+                        maxLength={6}
+                        value={managerPin}
+                        onChange={(e) => setManagerPin(e.target.value)}
+                        placeholder="Digite o PIN"
+                        className="w-full h-9 px-3 rounded-lg bg-white dark:bg-black/30 border border-gray-300 dark:border-white/10 text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-primary"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                        Justificativa Técnica do Desvio *
+                      </label>
+                      <input
+                        type="text"
+                        value={deviationReason}
+                        onChange={(e) => setDeviationReason(e.target.value)}
+                        placeholder="Ex: Lote piloto para degustação / Calda com laudo aceito"
+                        className="w-full h-9 px-3 rounded-lg bg-white dark:bg-black/30 border border-gray-300 dark:border-white/10 text-xs outline-none focus:ring-2 focus:ring-primary"
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Pesagem dos Insumos da Batelada */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                Insumos Necessários na Bancada (Escala: {scaleRatio.toFixed(2)}x)
+                Insumos Necessários na Bancada (Escala: {scaleRatio.toFixed(3)}x)
               </h4>
               <span
                 className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
@@ -200,14 +483,14 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
               </span>
             </div>
 
-            <div className="border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden divide-y divide-gray-100 dark:divide-white/5 max-h-52 overflow-y-auto bg-gray-50/50 dark:bg-black/10">
+            <div className="border border-gray-200 dark:border-white/10 rounded-2xl overflow-hidden divide-y divide-gray-100 dark:divide-white/5 max-h-48 overflow-y-auto bg-gray-50/50 dark:bg-black/10">
               {ingredientStatus.length === 0 ? (
                 <p className="p-4 text-xs text-center text-gray-400">
                   Nenhum ingrediente vinculado a esta receita.
                 </p>
               ) : (
                 ingredientStatus.map((item: any, idx: number) => (
-                  <div key={idx} className="p-3 flex items-center justify-between text-xs">
+                  <div key={idx} className="p-2.5 flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
                       <span className="size-6 rounded-lg bg-gray-200 dark:bg-white/10 flex items-center justify-center font-bold text-[11px] text-gray-600 dark:text-gray-300">
                         {idx + 1}
@@ -224,11 +507,11 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
 
                     <div className="text-right">
                       <p className="font-mono font-bold text-gray-900 dark:text-white">
-                        {formatPtBrStock(item.required, item.unit)}
+                        {formatPtBrStock(item.required, item.unit, true)}
                       </p>
                       {!item.hasStock && (
                         <p className="text-[10px] font-semibold text-red-500">
-                          Falta {formatPtBrStock(item.required - item.current, item.unit)}
+                          Falta {formatPtBrStock(item.required - item.current, item.unit, true)}
                         </p>
                       )}
                     </div>
@@ -247,7 +530,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Ex: Utilizar leite pasteurizado lote 44; manter maturação de 4 horas."
+              placeholder="Ex: Pasteurizar a 85°C e maturar a 4°C por 6 horas."
               className="w-full p-3 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 text-xs text-gray-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent outline-none resize-none"
             />
           </div>
@@ -263,7 +546,7 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
             </button>
             <button
               type="submit"
-              disabled={loading || recipes.length === 0}
+              disabled={loading || recipes.length === 0 || (hasTechnicalDeviations && (!authorizeDeviation || !managerPin.trim() || !deviationReason.trim()))}
               className="px-6 py-2.5 rounded-xl bg-primary text-gray-900 dark:text-black text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2 shadow-sm"
             >
               {loading ? (

@@ -192,6 +192,7 @@ export async function createManufacturingFormula(params: {
     prepTime?: number;
     totalCost: number;
     targetWeightG: number;
+    actualMassG?: number;
     targetFatPct?: number;
     targetMsnfPct?: number;
     targetSugarPct?: number;
@@ -220,6 +221,7 @@ export async function createManufacturingFormula(params: {
             prep_time: params.prepTime || 30,
             total_cost: params.totalCost,
             target_weight_g: params.targetWeightG,
+            actual_mass_g: params.actualMassG || params.targetWeightG,
             target_fat_pct: params.targetFatPct || null,
             target_msnf_pct: params.targetMsnfPct || null,
             target_sugar_pct: params.targetSugarPct || null,

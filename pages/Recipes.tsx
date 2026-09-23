@@ -4,7 +4,42 @@ import RecipeModal from '../components/RecipeModal';
 import { ManufacturingFormulaModal } from '../components/ManufacturingFormulaModal';
 import { useRecipes } from '../hooks/useRecipes';
 import { useProducts } from '../hooks/useProducts';
-import { formatPtBrStock } from '../services/formulationEngine';
+import {
+    formatPtBrStock,
+    calculateFormulation,
+    diagnoseRecipe
+} from '../services/formulationEngine';
+import {
+    FormulationIngredientItem,
+    FormulationTargets
+} from '../types';
+
+const getManufacturingMetricsAndDiagnostics = (recipe: any) => {
+    if (!recipe.recipe_items) return null;
+    const items: FormulationIngredientItem[] = recipe.recipe_items.map((it: any) => ({
+        ingredientId: it.ingredient_id,
+        ingredientName: it.ingredients?.name || 'Ingrediente',
+        quantity: Number(it.quantity || 0),
+        unit: it.unit,
+        costPerUnit: Number(it.ingredients?.cost_per_unit || 0),
+        isClosingIngredient: it.is_closing_ingredient,
+        profile: it.ingredients?.ingredient_technical_profiles?.[0] || null
+    }));
+
+    const targetWeightG = Number(recipe.target_weight_g || 10000);
+    const metrics = calculateFormulation(items, targetWeightG);
+    const targets: FormulationTargets = {
+        targetWeightG,
+        fatPct: recipe.target_fat_pct ? { target: Number(recipe.target_fat_pct), tolerance: Number(recipe.fat_tolerance_pct || 1.0) } : undefined,
+        msnfPct: recipe.target_msnf_pct ? { target: Number(recipe.target_msnf_pct), tolerance: Number(recipe.msnf_tolerance_pct || 1.0) } : undefined,
+        sugarPct: recipe.target_sugar_pct ? { target: Number(recipe.target_sugar_pct), tolerance: Number(recipe.sugar_tolerance_pct || 1.5) } : undefined,
+        totalSolidsPct: recipe.target_total_solids_pct ? { target: Number(recipe.target_total_solids_pct), tolerance: Number(recipe.solids_tolerance_pct || 2.0) } : undefined,
+        pod: recipe.target_pod ? { target: Number(recipe.target_pod), tolerance: Number(recipe.pod_tolerance || 1.5) } : undefined,
+        pac: recipe.target_pac ? { target: Number(recipe.target_pac), tolerance: Number(recipe.pac_tolerance || 2.0) } : undefined,
+    };
+    const diagnostics = diagnoseRecipe(metrics, targets);
+    return { metrics, diagnostics };
+};
 
 const Recipes: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'MANUFACTURING' | 'COMMERCIAL_ASSEMBLY'>('MANUFACTURING');
@@ -309,35 +344,91 @@ const Recipes: React.FC = () => {
                                         {/* Recipe Details (Expanded) */}
                                         {isExpanded && (
                                             <div className="border-t border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/5 p-5 space-y-4">
-                                                {/* Se for fabricação, mostra parâmetros de formulação */}
-                                                {isManufacturing && (
-                                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 bg-white dark:bg-surface-dark rounded-xl border border-gray-200 dark:border-white/10 text-xs">
-                                                        <div>
-                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta Gordura</span>
-                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
-                                                                {recipe.target_fat_pct ? `${recipe.target_fat_pct}%` : '-'}
-                                                            </strong>
+                                                {/* Se for fabricação, mostra tabela comparativa completa de Resultados Reais vs Metas */}
+                                                {isManufacturing && (() => {
+                                                    const analysis = getManufacturingMetricsAndDiagnostics(recipe);
+                                                    if (!analysis) return null;
+                                                    const { metrics, diagnostics } = analysis;
+
+                                                    return (
+                                                        <div className="space-y-3">
+                                                            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white dark:bg-surface-dark rounded-xl border border-gray-200 dark:border-white/10 text-xs">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="material-symbols-outlined text-primary text-base">scale</span>
+                                                                    <span className="text-gray-600 dark:text-gray-300">Massa Real dos Insumos:</span>
+                                                                    <strong className="font-mono text-gray-900 dark:text-white">
+                                                                        {formatPtBrStock(metrics.totalMassG / 1000, 'kg', true)}
+                                                                    </strong>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-gray-500">Massa Alvo Planejada:</span>
+                                                                    <strong className="font-mono text-gray-700 dark:text-gray-300">
+                                                                        {formatPtBrStock((recipe.target_weight_g || 10000) / 1000, 'kg', true)}
+                                                                    </strong>
+                                                                </div>
+                                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                                                    metrics.isBalanced
+                                                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                                                        : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                                                                }`}>
+                                                                    {metrics.isBalanced ? '✓ Massa Balanceada' : '⚠️ Desvio de Massa Detectado'}
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-white/10">
+                                                                <table className="w-full text-left text-xs bg-white dark:bg-surface-dark">
+                                                                    <thead className="bg-gray-100/70 dark:bg-white/5 border-b border-gray-200 dark:border-white/10 text-[10px] uppercase font-bold text-gray-500 tracking-wider">
+                                                                        <tr>
+                                                                            <th className="p-2.5">Parâmetro Físico-Químico</th>
+                                                                            <th className="p-2.5">Meta</th>
+                                                                            <th className="p-2.5">Real Calculado</th>
+                                                                            <th className="p-2.5">Diferença (Δ)</th>
+                                                                            <th className="p-2.5">Tolerância</th>
+                                                                            <th className="p-2.5 text-right">Estado</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody className="divide-y divide-gray-100 dark:divide-white/5 font-mono">
+                                                                        {diagnostics.map((d, dIdx) => (
+                                                                            <tr key={dIdx} className="hover:bg-gray-50 dark:hover:bg-white/5">
+                                                                                <td className="p-2.5 font-sans font-medium text-gray-800 dark:text-gray-200">
+                                                                                    {d.parameter}
+                                                                                </td>
+                                                                                <td className="p-2.5 text-gray-500">{d.target}</td>
+                                                                                <td className="p-2.5 font-bold text-gray-900 dark:text-white">
+                                                                                    {d.actual}
+                                                                                </td>
+                                                                                <td className={`p-2.5 font-bold ${
+                                                                                    d.status === 'OPTIMAL' ? 'text-emerald-600' :
+                                                                                    d.status === 'ACCEPTABLE' ? 'text-blue-600' :
+                                                                                    'text-red-500'
+                                                                                }`}>
+                                                                                    {d.deviation > 0 ? `+${d.deviation}` : d.deviation}
+                                                                                </td>
+                                                                                <td className="p-2.5 text-gray-400">±{d.tolerance}</td>
+                                                                                <td className="p-2.5 text-right font-sans">
+                                                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                                                                        d.status === 'OPTIMAL'
+                                                                                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                                                                            : d.status === 'ACCEPTABLE'
+                                                                                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                                                                                            : d.status === 'PENDING'
+                                                                                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
+                                                                                            : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+                                                                                    }`}>
+                                                                                        {d.status === 'OPTIMAL' ? 'Excelente' :
+                                                                                         d.status === 'ACCEPTABLE' ? 'Dentro da Meta' :
+                                                                                         d.status === 'PENDING' ? 'Pendente' :
+                                                                                         'Fora da Tolerância'}
+                                                                                    </span>
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta ESDL (Lácteo)</span>
-                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
-                                                                {recipe.target_msnf_pct ? `${recipe.target_msnf_pct}%` : '-'}
-                                                            </strong>
-                                                        </div>
-                                                        <div>
-                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta POD (Doçura)</span>
-                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
-                                                                {recipe.target_pod || '-'}
-                                                            </strong>
-                                                        </div>
-                                                        <div>
-                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta PAC (Anticongelante)</span>
-                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
-                                                                {recipe.target_pac || '-'}
-                                                            </strong>
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                    );
+                                                })()}
 
                                                 <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 dark:text-gray-300">
                                                     {isManufacturing ? 'Composição do Mix da Batelada:' : 'Itens Consumidos no Atendimento / Venda:'}
@@ -368,6 +459,29 @@ const Recipes: React.FC = () => {
                                                                                 Fechamento de Peso
                                                                             </span>
                                                                         )}
+                                                                        {isManufacturing && (() => {
+                                                                            const profile = item.ingredients?.ingredient_technical_profiles?.[0];
+                                                                            const status = profile?.data_status;
+                                                                            if (status === 'CONFIRMED') {
+                                                                                return (
+                                                                                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold">
+                                                                                        ✓ Homologado
+                                                                                    </span>
+                                                                                );
+                                                                            } else if (status === 'ESTIMATED') {
+                                                                                return (
+                                                                                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-medium">
+                                                                                        Estimado (TACO/Planilha)
+                                                                                    </span>
+                                                                                );
+                                                                            } else {
+                                                                                return (
+                                                                                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-400 font-medium">
+                                                                                        Pendente
+                                                                                    </span>
+                                                                                );
+                                                                            }
+                                                                        })()}
                                                                     </div>
                                                                 </div>
 

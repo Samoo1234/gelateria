@@ -76,13 +76,19 @@ export const productionService = {
   },
 
   /**
-   * Cria um novo lote de produção (status PLANNED ou IN_PROGRESS)
+   * Cria um novo lote de produção (status PLANNED ou IN_PROGRESS).
+   * Registra autorização de desvio técnico se fornecida por operador habilitado.
    */
   async createBatch(
     recipeId: string,
     plannedQuantity: number,
     employeeId?: string,
-    notes?: string
+    notes?: string,
+    deviationDetails?: {
+      authorized: boolean;
+      authorizedBy?: string | null;
+      reason?: string | null;
+    }
   ): Promise<ProductionBatchRow> {
     const batchCode = `LOTE-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -95,7 +101,10 @@ export const productionService = {
         employee_id: employeeId || null,
         status: 'IN_PROGRESS',
         started_at: new Date().toISOString(),
-        notes: notes || null
+        notes: notes || null,
+        deviation_authorized: deviationDetails?.authorized || false,
+        deviation_authorized_by: deviationDetails?.authorizedBy || null,
+        deviation_reason: deviationDetails?.reason || null
       })
       .select(`
         *,
@@ -187,7 +196,15 @@ export const productionService = {
           unit,
           cost,
           is_closing_ingredient,
-          ingredients:ingredient_id(id, name, unit, current_stock, min_stock, cost_per_unit)
+          ingredients:ingredient_id(
+            id,
+            name,
+            unit,
+            current_stock,
+            min_stock,
+            cost_per_unit,
+            ingredient_technical_profiles(*)
+          )
         )
       `)
       .eq('recipe_type', 'MANUFACTURING')

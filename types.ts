@@ -104,6 +104,11 @@ export interface IngredientTechnicalProfile {
   density_g_ml: number;
   is_mix_ingredient: boolean;
   data_status: DataStatus;
+  validated_by?: string | null;
+  validated_at?: string | null;
+  manufacturer?: string | null;
+  brand_product_name?: string | null;
+  effective_pac_mode?: 'BY_COMPONENTS' | 'DIRECT_FACTOR';
   source?: string | null;
   notes?: string | null;
   created_at?: string;
@@ -137,6 +142,8 @@ export interface FormulationCalculatedMetrics {
   costPerKg: number;
   missingFactors: { ingredientName: string; missingProperties: string[] }[];
   isBalanced: boolean;
+  isProductionEligible: boolean;
+  hasPendingFactors: boolean;
 }
 
 export interface FormulationTargets {
@@ -156,7 +163,7 @@ export interface TargetDiagnostic {
   deviation: number;
   tolerance: number;
   isWithinTolerance: boolean;
-  status: 'OPTIMAL' | 'ACCEPTABLE' | 'OUT_OF_BOUNDS';
+  status: 'OPTIMAL' | 'ACCEPTABLE' | 'OUT_OF_BOUNDS' | 'PENDING';
 }
 
 export interface PricingMetrics {
