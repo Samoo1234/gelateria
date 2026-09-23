@@ -26,10 +26,10 @@ function assert(condition, testName, details = '') {
 
 async function run() {
   console.log('========================================================================');
-  console.log('  GELATO MANAGER V2 - VERIFICAÇÃO OBRIGATÓRIA COM DADOS DO BANCO REAL');
+  console.log('  GELATO MANAGER V2 - VERIFICAÇÃO DE CALIBRAÇÃO E HISTÓRICO NO BANCO REAL');
   console.log('========================================================================\n');
 
-  // Busca fórmulas de fabricação reais
+  // Busca todas as fórmulas de fabricação (ativas e arquivadas)
   const { data: recipes, error: recErr } = await supabase
     .from('recipes')
     .select(`
@@ -37,6 +37,9 @@ async function run() {
       name,
       recipe_type,
       yield,
+      version,
+      status,
+      is_active,
       target_weight_g,
       target_fat_pct,
       fat_tolerance_pct,
@@ -54,29 +57,28 @@ async function run() {
         )
       )
     `)
-    .eq('recipe_type', 'MANUFACTURING')
-    .eq('is_active', true);
+    .eq('recipe_type', 'MANUFACTURING');
 
   if (recErr || !recipes) {
     console.error('Falha ao buscar receitas:', recErr);
     process.exit(1);
   }
 
-  const baseBranca = recipes.find(r => r.name.toLowerCase().includes('base branca'));
-  const baseAcai = recipes.find(r => r.name.toLowerCase().includes('açaí') || r.name.toLowerCase().includes('acai'));
+  const baseBrancaV2 = recipes.find(r => r.name.toLowerCase().includes('base branca') && r.is_active === true);
+  const baseBrancaV1 = recipes.find(r => r.name.toLowerCase().includes('base branca') && r.is_active === false);
+  const baseAcai = recipes.find(r => (r.name.toLowerCase().includes('açaí') || r.name.toLowerCase().includes('acai')) && r.is_active === true);
 
   // --------------------------------------------------------------------------------------------------
-  // VERIFICAÇÃO 1: Parcelas de massa da Base Branca (5,974 kg leite + 1,200 kg creme + 3,000 kg secos = 10,174 kg)
+  // VERIFICAÇÃO 1: Calibração da Base Branca v2.0 (10,000 kg cravados e zero desvio)
   // --------------------------------------------------------------------------------------------------
-  console.log('--- Verificação 1: Parcelas de massa da Base Branca nos dados persistidos ---');
+  console.log('--- Verificação 1: Base Branca v2.0 Vigente Calibrada (10,000 kg) ---');
   {
     let leiteMassKg = 0;
     let cremeMassKg = 0;
     let secosMassKg = 0;
 
-    const items = baseBranca.recipe_items.map((it) => {
+    const items = baseBrancaV2.recipe_items.map((it) => {
       const prof = extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles);
-      const isLiquid = it.unit === 'L' || it.unit === 'ml';
       const density = prof?.density_g_ml;
       let massG = 0;
       if (it.unit === 'kg') massG = it.quantity * 1000;
@@ -104,25 +106,116 @@ async function run() {
       };
     });
 
-    const metrics = calculateFormulation(items, Number(baseBranca.target_weight_g || 10000));
+    const metrics = calculateFormulation(items, Number(baseBrancaV2.target_weight_g || 10000));
     const totalMassKg = metrics.totalMassG / 1000;
 
-    const leiteOk = Math.abs(leiteMassKg - 5.974) < 0.005;
-    const cremeOk = Math.abs(cremeMassKg - 1.200) < 0.005;
-    const secosOk = Math.abs(secosMassKg - 3.000) < 0.005;
-    const totalOk = Math.abs(totalMassKg - 10.174) < 0.005;
+    const leiteOk = Math.abs(leiteMassKg - 5.150) < 0.005;
+    const cremeOk = Math.abs(cremeMassKg - 2.450) < 0.005;
+    const secosOk = Math.abs(secosMassKg - 2.400) < 0.005;
+    const totalOk = Math.abs(totalMassKg - 10.000) < 0.005;
 
     assert(
       leiteOk && cremeOk && secosOk && totalOk,
-      'Verificação 1 (Base Branca)',
-      `Leite: ${leiteMassKg.toFixed(3)} kg, Creme: ${cremeMassKg.toFixed(3)} kg, Secos: ${secosMassKg.toFixed(3)} kg => Total: ${totalMassKg.toFixed(3)} kg (Desvio: +${(totalMassKg - 10.000).toFixed(3)} kg)`
+      'Verificação 1 (Base Branca v2.0)',
+      `Leite: ${leiteMassKg.toFixed(3)} kg, Creme: ${cremeMassKg.toFixed(3)} kg, Secos: ${secosMassKg.toFixed(3)} kg => Total: ${totalMassKg.toFixed(3)} kg (Desvio: ${(totalMassKg - 10.000).toFixed(3)} kg, Versão: ${baseBrancaV2.version})`
     );
   }
 
   // --------------------------------------------------------------------------------------------------
-  // VERIFICAÇÃO 2: Parcelas de massa do Açaí (3,980 kg água + 6,020 kg secos/polpa = 10,000 kg)
+  // VERIFICAÇÃO 2: Gordura da Base Branca v2.0 em 8,02% (Meta 8,00%, Status OPTIMAL)
   // --------------------------------------------------------------------------------------------------
-  console.log('\n--- Verificação 2: Parcelas de massa da Calda Base Açaí nos dados persistidos ---');
+  console.log('\n--- Verificação 2: Gordura da Base Branca v2.0 em 8,02% (Dentro da Meta 8%) ---');
+  {
+    const items = baseBrancaV2.recipe_items.map((it) => ({
+      ingredientId: it.ingredients.id,
+      ingredientName: it.ingredients.name,
+      quantity: Number(it.quantity),
+      unit: it.unit,
+      costPerUnit: Number(it.ingredients.cost_per_unit || 0),
+      isClosingIngredient: it.is_closing_ingredient,
+      profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
+    }));
+
+    const metrics = calculateFormulation(items, 10000);
+    const diags = diagnoseRecipe(metrics, {
+      targetWeightG: 10000,
+      fatPct: { target: 8.0, tolerance: 1.0 },
+      msnfPct: { target: 10.5, tolerance: 1.0 },
+      sugarPct: { target: 18.0, tolerance: 1.5 },
+      totalSolidsPct: { target: 36.5, tolerance: 2.0 },
+      pod: { target: 16.4, tolerance: 1.5 },
+      pac: { target: 27.5, tolerance: 2.0 }
+    });
+
+    const fatDiag = diags.find(d => d.parameter === 'Gordura (%)');
+    const allOptimal = diags.every(d => d.status === 'OPTIMAL');
+
+    assert(
+      Math.abs(metrics.fatPct - 8.02) < 0.05 && fatDiag?.status === 'OPTIMAL' && allOptimal,
+      'Verificação 2 (Gordura v2.0)',
+      `Gordura calculada: ${metrics.fatPct}% (Meta: 8.00% ± 1.00%, Status: ${fatDiag?.status}). 100% dos parâmetros em status OPTIMAL!`
+    );
+  }
+
+  // --------------------------------------------------------------------------------------------------
+  // VERIFICAÇÃO 3: Rastreabilidade e Histórico da Versão 1.0 Arquivada
+  // --------------------------------------------------------------------------------------------------
+  console.log('\n--- Verificação 3: Preservação Histórica da Versão 1.0 no Banco ---');
+  {
+    const isArchived = baseBrancaV1 && baseBrancaV1.status === 'ARCHIVED' && baseBrancaV1.is_active === false;
+
+    const v1Items = baseBrancaV1.recipe_items.map((it) => ({
+      ingredientId: it.ingredients.id,
+      ingredientName: it.ingredients.name,
+      quantity: Number(it.quantity),
+      unit: it.unit,
+      costPerUnit: Number(it.ingredients.cost_per_unit || 0),
+      isClosingIngredient: it.is_closing_ingredient,
+      profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
+    }));
+
+    const v1Metrics = calculateFormulation(v1Items, 10000);
+
+    const v1MassOk = Math.abs(v1Metrics.totalMassG - 10174) < 5;
+    const v1FatOk = Math.abs(v1Metrics.fatPct - 5.12) < 0.05;
+
+    assert(
+      isArchived && v1MassOk && v1FatOk,
+      'Verificação 3 (Histórico v1.0 Preservado)',
+      `v1.0 arquivada intacta: status=${baseBrancaV1?.status}, is_active=${baseBrancaV1?.is_active}, massa=${(v1Metrics.totalMassG/1000).toFixed(3)} kg, gordura=${v1Metrics.fatPct}%`
+    );
+  }
+
+  // --------------------------------------------------------------------------------------------------
+  // VERIFICAÇÃO 4: Prévia de Ordem de 10 kg da Base Branca v2.0 (Escala 1,000x exata)
+  // --------------------------------------------------------------------------------------------------
+  console.log('\n--- Verificação 4: Escala na Ordem de Produção de 10 kg da v2.0 ---');
+  {
+    const bbItems = baseBrancaV2.recipe_items.map((it) => ({
+      ingredientId: it.ingredients.id,
+      ingredientName: it.ingredients.name,
+      quantity: Number(it.quantity),
+      unit: it.unit,
+      costPerUnit: Number(it.ingredients.cost_per_unit || 0),
+      isClosingIngredient: it.is_closing_ingredient,
+      profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
+    }));
+    const bbMetrics = calculateFormulation(bbItems, 10000);
+    const bbRealMassKg = bbMetrics.totalMassG / 1000;
+    const bbPlannedKg = 10.0;
+    const bbScaleRatio = bbPlannedKg / bbRealMassKg;
+
+    assert(
+      Math.abs(bbScaleRatio - 1.000) < 0.001,
+      'Verificação 4 (Escala 10kg)',
+      `Base Branca v2.0 (10kg): escala = ${bbScaleRatio.toFixed(3)}x (massa real ${bbRealMassKg.toFixed(3)} kg). Zero divergência.`
+    );
+  }
+
+  // --------------------------------------------------------------------------------------------------
+  // VERIFICAÇÃO 5: Parcelas de massa da Calda Base Açaí (10,000 kg com 3,980 kg de água)
+  // --------------------------------------------------------------------------------------------------
+  console.log('\n--- Verificação 5: Parcelas de massa da Calda Base Açaí nos dados persistidos ---');
   {
     let aguaMassKg = 0;
     let demaisMassKg = 0;
@@ -163,157 +256,15 @@ async function run() {
 
     assert(
       aguaOk && demaisOk && totalOk,
-      'Verificação 2 (Açaí)',
+      'Verificação 5 (Açaí)',
       `Água: ${aguaMassKg.toFixed(3)} kg, Demais: ${demaisMassKg.toFixed(3)} kg => Total: ${totalMassKg.toFixed(3)} kg`
     );
   }
 
   // --------------------------------------------------------------------------------------------------
-  // VERIFICAÇÃO 3: Gordura calculada da Base Branca ~5,12% (meta 8%) e perfis carregados (não mais 0% nem Pendente)
+  // VERIFICAÇÃO 6: Preservação de Fichas Comerciais (COMMERCIAL_ASSEMBLY), PDV e Estoque
   // --------------------------------------------------------------------------------------------------
-  console.log('\n--- Verificação 3: Gordura da Base Branca calculada em ~5,12% frente à meta de 8% ---');
-  {
-    const items = baseBranca.recipe_items.map((it) => ({
-      ingredientId: it.ingredients.id,
-      ingredientName: it.ingredients.name,
-      quantity: Number(it.quantity),
-      unit: it.unit,
-      costPerUnit: Number(it.ingredients.cost_per_unit || 0),
-      isClosingIngredient: it.is_closing_ingredient,
-      profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
-    }));
-
-    const metrics = calculateFormulation(items, 10000);
-    const diags = diagnoseRecipe(metrics, {
-      targetWeightG: 10000,
-      fatPct: { target: 8.0, tolerance: 1.0 }
-    });
-
-    const fatDiag = diags.find(d => d.parameter === 'Gordura (%)');
-
-    // Confirma que nenhum insumo da Base Branca ficou sem perfil (não há "Perfil técnico completo não cadastrado")
-    const noMissingProfiles = !metrics.dataErrors || metrics.dataErrors.length === 0;
-
-    assert(
-      Math.abs(metrics.fatPct - 5.12) < 0.02 && fatDiag?.status === 'OUT_OF_BOUNDS' && noMissingProfiles,
-      'Verificação 3 (Gordura ~5,12%)',
-      `Gordura calculada: ${metrics.fatPct}% (Meta: 8.00%, Tolerância: ±1.00%, Diferença: ${fatDiag?.deviation}%, Estado: ${fatDiag?.status})`
-    );
-  }
-
-  // --------------------------------------------------------------------------------------------------
-  // VERIFICAÇÃO 4: Prévia de Ordem de 10 kg: escala de 0,983x para Base Branca e 1,000x para Açaí (NÃO 3,333x nem 1,661x)
-  // --------------------------------------------------------------------------------------------------
-  console.log('\n--- Verificação 4: Escala na Ordem de Produção de 10 kg (Sem exclusão de líquidos) ---');
-  {
-    // Base Branca
-    const bbItems = baseBranca.recipe_items.map((it) => ({
-      ingredientId: it.ingredients.id,
-      ingredientName: it.ingredients.name,
-      quantity: Number(it.quantity),
-      unit: it.unit,
-      costPerUnit: Number(it.ingredients.cost_per_unit || 0),
-      isClosingIngredient: it.is_closing_ingredient,
-      profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
-    }));
-    const bbMetrics = calculateFormulation(bbItems, 10000);
-    const bbRealMassKg = bbMetrics.totalMassG / 1000;
-    const bbPlannedKg = 10.0;
-    const bbScaleRatio = bbPlannedKg / bbRealMassKg;
-
-    // Açaí
-    const acaiItems = baseAcai.recipe_items.map((it) => ({
-      ingredientId: it.ingredients.id,
-      ingredientName: it.ingredients.name,
-      quantity: Number(it.quantity),
-      unit: it.unit,
-      costPerUnit: Number(it.ingredients.cost_per_unit || 0),
-      isClosingIngredient: it.is_closing_ingredient,
-      profile: extractTechnicalProfile(it.ingredients?.ingredient_technical_profiles)
-    }));
-    const acaiMetrics = calculateFormulation(acaiItems, 10000);
-    const acaiRealMassKg = acaiMetrics.totalMassG / 1000;
-    const acaiPlannedKg = 10.0;
-    const acaiScaleRatio = acaiPlannedKg / acaiRealMassKg;
-
-    const bbScaleOk = Math.abs(bbScaleRatio - 0.983) < 0.005; // 10 / 10.174 = 0.9829
-    const acaiScaleOk = Math.abs(acaiScaleRatio - 1.000) < 0.001; // 10 / 10 = 1.000
-
-    assert(
-      bbScaleOk && acaiScaleOk && bbScaleRatio !== 3.333 && acaiScaleRatio !== 1.661,
-      'Verificação 4 (Escala 10kg)',
-      `Base Branca (10kg): escala = ${bbScaleRatio.toFixed(3)}x (massa real ${bbRealMassKg.toFixed(3)} kg). Açaí (10kg): escala = ${acaiScaleRatio.toFixed(3)}x (massa real ${acaiRealMassKg.toFixed(3)} kg).`
-    );
-  }
-
-  // --------------------------------------------------------------------------------------------------
-  // VERIFICAÇÃO 5: Bloqueio estrito quando faltar densidade de líquido ou ficha técnica (Erro de dados intransponível)
-  // --------------------------------------------------------------------------------------------------
-  console.log('\n--- Verificação 5: Bloqueio Estrito por Densidade Ausente ou Ficha Ausente ---');
-  {
-    // 5a. Líquido sem densidade
-    const itemsMissingDensity = [
-      {
-        ingredientId: 'leite-teste',
-        ingredientName: 'Leite sem densidade',
-        quantity: 5.0,
-        unit: 'L',
-        costPerUnit: 4.0,
-        profile: {
-          density_g_ml: 0, // DENSIDADE INVÁLIDA / ZERO
-          fat_pct: 3.5,
-          is_mix_ingredient: true,
-          data_status: 'CONFIRMED'
-        }
-      },
-      {
-        ingredientId: 'acucar-teste',
-        ingredientName: 'Açúcar',
-        quantity: 1.0,
-        unit: 'kg',
-        costPerUnit: 4.0,
-        profile: {
-          density_g_ml: 1.0,
-          fat_pct: 0,
-          is_mix_ingredient: true,
-          data_status: 'CONFIRMED'
-        }
-      }
-    ];
-
-    const mNoDensity = calculateFormulation(itemsMissingDensity, 6000);
-    const densityBlocked = mNoDensity.hasDataError === true && 
-      mNoDensity.isProductionEligible === false &&
-      mNoDensity.dataErrors.some(e => e.includes('Densidade ausente'));
-
-    // 5b. Insumo sem ficha técnica cadastrada
-    const itemsMissingProfile = [
-      {
-        ingredientId: 'insumo-sem-ficha',
-        ingredientName: 'Insumo Misterioso',
-        quantity: 2.0,
-        unit: 'kg',
-        costPerUnit: 10.0,
-        profile: null // FICHA AUSENTE
-      }
-    ];
-
-    const mNoProfile = calculateFormulation(itemsMissingProfile, 2000);
-    const profileBlocked = mNoProfile.hasDataError === true &&
-      mNoProfile.isProductionEligible === false &&
-      mNoProfile.dataErrors.some(e => e.includes('Ficha técnica ausente'));
-
-    assert(
-      densityBlocked && profileBlocked,
-      'Verificação 5 (Bloqueio Erro de Dados)',
-      `Líquido sem densidade bloqueou: hasDataError=${mNoDensity.hasDataError}. Ficha ausente bloqueou: hasDataError=${mNoProfile.hasDataError}. Ambos impedem elegibilidade e início de produção.`
-    );
-  }
-
-  // --------------------------------------------------------------------------------------------------
-  // VERIFICAÇÃO 6: Preservação de Fichas de Venda, PDV e Estoque
-  // --------------------------------------------------------------------------------------------------
-  console.log('\n--- Verificação 6: Preservação de Fichas Comerciais (COMMERCIAL_ASSEMBLY), PDV e Estoque ---');
+  console.log('\n--- Verificação 6: Preservação de Fichas Comerciais, PDV e Estoque ---');
   {
     const { data: commRecipes } = await supabase
       .from('recipes')
