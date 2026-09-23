@@ -16,21 +16,33 @@ export interface RecipeItemWithIngredient extends RecipeItem {
     ingredient_name?: string;
 }
 
-// Get all recipes
-export async function getRecipes() {
-    const { data, error } = await supabase
+// Get all recipes with optional recipe_type filter
+export async function getRecipes(recipeType?: 'MANUFACTURING' | 'COMMERCIAL_ASSEMBLY' | 'ALL') {
+    let query = supabase
         .from('recipes')
         .select(`
-      *,
-      products(name, price, image_url),
-      recipe_items(
-        *,
-        ingredients(name, unit, cost_per_unit)
-      )
-    `)
+          *,
+          products(id, name, price, image_url),
+          recipe_items(
+            *,
+            ingredients(
+              id,
+              name,
+              unit,
+              cost_per_unit,
+              current_stock,
+              ingredient_technical_profiles(*)
+            )
+          )
+        `)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
+    if (recipeType && recipeType !== 'ALL') {
+        query = query.eq('recipe_type', recipeType);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     return data;
 }
@@ -169,4 +181,81 @@ export async function getRecipesDetailed() {
 
     if (error) throw error;
     return data;
+}
+
+// Create manufacturing formula with items and technical metrics
+export async function createManufacturingFormula(params: {
+    name: string;
+    productId?: string | null;
+    yieldKg: number;
+    baseType: 'MILK' | 'WATER' | 'NEUTRAL';
+    prepTime?: number;
+    totalCost: number;
+    targetWeightG: number;
+    targetFatPct?: number;
+    targetMsnfPct?: number;
+    targetSugarPct?: number;
+    targetTotalSolidsPct?: number;
+    targetPod?: number;
+    targetPac?: number;
+    calculatedMetrics?: any;
+    notes?: string;
+    items: Array<{
+        ingredientId: string;
+        quantity: number;
+        unit: string;
+        cost: number;
+        isClosingIngredient?: boolean;
+    }>;
+}) {
+    // 1. Inserir fórmula na tabela recipes
+    const { data: recipeData, error: recipeError } = await supabase
+        .from('recipes')
+        .insert({
+            name: params.name,
+            product_id: params.productId || null,
+            recipe_type: 'MANUFACTURING',
+            base_type: params.baseType,
+            yield: params.yieldKg,
+            prep_time: params.prepTime || 30,
+            total_cost: params.totalCost,
+            target_weight_g: params.targetWeightG,
+            target_fat_pct: params.targetFatPct || null,
+            target_msnf_pct: params.targetMsnfPct || null,
+            target_sugar_pct: params.targetSugarPct || null,
+            target_total_solids_pct: params.targetTotalSolidsPct || null,
+            target_pod: params.targetPod || null,
+            target_pac: params.targetPac || null,
+            calculated_metrics: params.calculatedMetrics || null,
+            notes: params.notes || null,
+            status: 'APPROVED',
+            is_active: true,
+        })
+        .select()
+        .single();
+
+    if (recipeError) throw recipeError;
+
+    // 2. Inserir itens
+    const itemsToInsert = params.items.map((item, index) => ({
+        recipe_id: recipeData.id,
+        ingredient_id: item.ingredientId,
+        quantity: item.quantity,
+        unit: item.unit,
+        cost: item.cost,
+        is_closing_ingredient: item.isClosingIngredient || false,
+        display_order: index,
+    }));
+
+    const { data: itemsData, error: itemsError } = await supabase
+        .from('recipe_items')
+        .insert(itemsToInsert)
+        .select();
+
+    if (itemsError) {
+        await supabase.from('recipes').delete().eq('id', recipeData.id);
+        throw itemsError;
+    }
+
+    return { recipe: recipeData, items: itemsData };
 }

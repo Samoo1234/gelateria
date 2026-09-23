@@ -52,7 +52,7 @@ export const productionService = {
       .from('production_batches')
       .select(`
         *,
-        recipes:recipe_id(name, yield_quantity, yield_unit),
+        recipes:recipe_id(id, name, yield, recipe_type, product_id, products:product_id(name)),
         employees:employee_id(name)
       `)
       .order('created_at', { ascending: false });
@@ -64,6 +64,11 @@ export const productionService = {
 
     return (data || []).map((b: any) => ({
       ...b,
+      recipes: {
+        name: b.recipes?.name || b.recipes?.products?.name || 'Fórmula de Gelato',
+        yield_quantity: Number(b.recipes?.yield || 10),
+        yield_unit: 'kg'
+      },
       planned_quantity: Number(b.planned_quantity || 0),
       produced_quantity: b.produced_quantity ? Number(b.produced_quantity) : null,
       loss_quantity: b.loss_quantity ? Number(b.loss_quantity) : null,
@@ -154,27 +159,39 @@ export const productionService = {
   },
 
   /**
-   * Busca receitas com ingredientes para planejamento de produção
+   * Busca receitas elegíveis para fabricação em lote (tipo MANUFACTURING).
+   * Fichas de montagem/venda comercial (com casquinhas/copos unitários) são excluídas da produção de caldas.
    */
   async getRecipesForProduction() {
     const { data, error } = await supabase
       .from('recipes')
       .select(`
         id,
+        name,
+        recipe_type,
+        base_type,
         product_id,
         yield,
         prep_time,
         total_cost,
-        products:product_id(id, name, category, price, image_url),
+        target_weight_g,
+        status,
+        target_fat_pct,
+        target_pod,
+        target_pac,
+        products:product_id(id, name, category_id, price, image_url),
         recipe_items:recipe_items(
           id,
           ingredient_id,
           quantity,
           unit,
           cost,
-          ingredients:ingredient_id(id, name, unit, current_stock, minimum_stock, cost_per_unit)
+          is_closing_ingredient,
+          ingredients:ingredient_id(id, name, unit, current_stock, min_stock, cost_per_unit)
         )
       `)
+      .eq('recipe_type', 'MANUFACTURING')
+      .eq('is_active', true)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -182,7 +199,11 @@ export const productionService = {
       return [];
     }
 
-    return data || [];
+    return (data || []).map((r: any) => ({
+      ...r,
+      displayName: r.name || r.products?.name || 'Fórmula de Fabricação',
+      yield: Number(r.yield || 10),
+    }));
   },
 
   /**

@@ -82,3 +82,88 @@ export interface CostBreakdown {
   overhead?: number;
   total: number;
 }
+
+// Technical Formulation Types
+export type DataStatus = 'CONFIRMED' | 'ESTIMATED' | 'MISSING';
+export type RecipeType = 'MANUFACTURING' | 'COMMERCIAL_ASSEMBLY';
+export type BaseType = 'MILK' | 'WATER' | 'NEUTRAL';
+export type RecipeStatus = 'DRAFT' | 'APPROVED' | 'ARCHIVED';
+
+export interface IngredientTechnicalProfile {
+  id?: string;
+  ingredient_id: string;
+  water_pct: number;
+  total_solids_pct: number;
+  fat_pct: number;
+  msnf_pct: number; // ESDL
+  lactose_pct: number;
+  sucrose_pct: number;
+  other_sugars_pct: number;
+  pod_factor: number; // sacarose = 1.0
+  pac_factor: number; // sacarose = 1.0
+  density_g_ml: number;
+  is_mix_ingredient: boolean;
+  data_status: DataStatus;
+  source?: string | null;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface FormulationIngredientItem {
+  ingredientId: string;
+  ingredientName: string;
+  quantity: number; // na unidade escolhida
+  unit: UnitType;
+  costPerUnit: number;
+  isClosingIngredient?: boolean;
+  profile?: IngredientTechnicalProfile | null;
+}
+
+export interface FormulationCalculatedMetrics {
+  totalMassG: number;
+  totalFatG: number;
+  fatPct: number;
+  totalMsnfG: number;
+  msnfPct: number;
+  totalSugarG: number;
+  sugarPct: number;
+  totalSolidsG: number;
+  totalSolidsPct: number;
+  waterPct: number;
+  pod: number; // Poder Edulcorante por 100g da mistura
+  pac: number; // Poder Anticongelante por 100g da mistura
+  costTotal: number;
+  costPerKg: number;
+  missingFactors: { ingredientName: string; missingProperties: string[] }[];
+  isBalanced: boolean;
+}
+
+export interface FormulationTargets {
+  targetWeightG: number;
+  fatPct?: { target: number; tolerance: number };
+  msnfPct?: { target: number; tolerance: number };
+  sugarPct?: { target: number; tolerance: number };
+  totalSolidsPct?: { target: number; tolerance: number };
+  pod?: { target: number; tolerance: number };
+  pac?: { target: number; tolerance: number };
+}
+
+export interface TargetDiagnostic {
+  parameter: string;
+  target: number;
+  actual: number;
+  deviation: number;
+  tolerance: number;
+  isWithinTolerance: boolean;
+  status: 'OPTIMAL' | 'ACCEPTABLE' | 'OUT_OF_BOUNDS';
+}
+
+export interface PricingMetrics {
+  cost: number;
+  price: number;
+  multiplier: number; // Preço / Custo (ex: 6.6x)
+  markupPct: number; // (Preço - Custo) / Custo * 100
+  marginPct: number; // (Preço - Custo) / Preço * 100
+  profit: number; // Preço - Custo
+}

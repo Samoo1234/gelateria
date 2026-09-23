@@ -1,19 +1,24 @@
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
 import RecipeModal from '../components/RecipeModal';
+import { ManufacturingFormulaModal } from '../components/ManufacturingFormulaModal';
 import { useRecipes } from '../hooks/useRecipes';
 import { useProducts } from '../hooks/useProducts';
+import { formatPtBrStock } from '../services/formulationEngine';
 
 const Recipes: React.FC = () => {
-    const { recipes, loading, error, addRecipe } = useRecipes();
+    const [activeTab, setActiveTab] = useState<'MANUFACTURING' | 'COMMERCIAL_ASSEMBLY'>('MANUFACTURING');
+    const { recipes, loading, error, addRecipe, addManufacturingFormula, refetch } = useRecipes(activeTab);
     const { products } = useProducts();
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
-    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isCommercialModalOpen, setIsCommercialModalOpen] = useState(false);
+    const [isManufacturingModalOpen, setIsManufacturingModalOpen] = useState(false);
 
-    const filteredRecipes = recipes.filter((recipe: any) =>
-        recipe.products?.name?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredRecipes = recipes.filter((recipe: any) => {
+        const title = recipe.name || recipe.products?.name || '';
+        return title.toLowerCase().includes(searchTerm.toLowerCase());
+    });
 
     const formatCurrency = (value: number) => {
         return `R$ ${value.toFixed(2).replace('.', ',')}`;
@@ -38,7 +43,7 @@ const Recipes: React.FC = () => {
                 <div className="p-6 lg:p-8 h-full flex items-center justify-center">
                     <div className="text-center">
                         <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-                        <p className="mt-4 text-gray-600 dark:text-gray-400">Carregando receitas...</p>
+                        <p className="mt-4 text-gray-600 dark:text-gray-400">Carregando formulações...</p>
                     </div>
                 </div>
             </Layout>
@@ -60,100 +65,189 @@ const Recipes: React.FC = () => {
 
     return (
         <Layout>
-            <div className="p-6 lg:p-8 h-full">
-                <div className="max-w-7xl mx-auto">
+            <div className="p-6 lg:p-8 h-full overflow-y-auto">
+                <div className="max-w-7xl mx-auto space-y-6">
                     {/* Page Heading */}
-                    <div className="flex flex-wrap justify-between gap-3 p-4">
-                        <div className="flex min-w-72 flex-col gap-3">
-                            <p className="text-gray-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Receitas</p>
-                            <p className="text-green-600 dark:text-green-400 text-base font-normal leading-normal">
-                                Fichas técnicas com ingredientes e cálculo automático de custos.
+                    <div className="flex flex-wrap justify-between items-center gap-4">
+                        <div>
+                            <h1 className="text-gray-900 dark:text-white text-4xl font-black font-display tracking-tight">
+                                Formulação & Fichas Técnicas
+                            </h1>
+                            <p className="text-gray-600 dark:text-gray-400 text-sm mt-1">
+                                Separação estrita entre <strong>Fórmulas de Fabricação</strong> (caldas de gelato/picolé/açaí) e <strong>Fichas de Venda</strong> (montagem no balcão).
                             </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {activeTab === 'MANUFACTURING' ? (
+                                <button
+                                    onClick={() => setIsManufacturingModalOpen(true)}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-gray-900 dark:text-black text-sm font-black tracking-wide hover:opacity-90 shadow-md transition-all"
+                                >
+                                    <span className="material-symbols-outlined text-xl">science</span>
+                                    <span>Nova Fórmula de Fabricação</span>
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => setIsCommercialModalOpen(true)}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-gray-900 dark:text-black text-sm font-black tracking-wide hover:opacity-90 shadow-md transition-all"
+                                >
+                                    <span className="material-symbols-outlined text-xl">add</span>
+                                    <span>Nova Ficha de Venda</span>
+                                </button>
+                            )}
                         </div>
                     </div>
 
-                    {/* Stats */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 px-4 py-3">
-                        <div className="bg-white dark:bg-surface-dark rounded-xl p-4 border border-gray-200 dark:border-white/10">
-                            <p className="text-gray-500 dark:text-gray-400 text-sm">Total de Receitas</p>
-                            <p className="text-2xl font-bold text-gray-900 dark:text-white">{recipes.length}</p>
-                        </div>
-                        <div className="bg-white dark:bg-surface-dark rounded-xl p-4 border border-gray-200 dark:border-white/10">
-                            <p className="text-gray-500 dark:text-gray-400 text-sm">Produtos Cadastrados</p>
-                            <p className="text-2xl font-bold text-gray-900 dark:text-white">{products.length}</p>
-                        </div>
-                        <div className="bg-white dark:bg-surface-dark rounded-xl p-4 border border-gray-200 dark:border-white/10">
-                            <p className="text-gray-500 dark:text-gray-400 text-sm">Custo Médio</p>
-                            <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                                {recipes.length > 0 ? formatCurrency(recipes.reduce((sum: number, r: any) => sum + (r.total_cost || 0), 0) / recipes.length) : 'R$ 0,00'}
-                            </p>
-                        </div>
+                    {/* Abas Arquiteturais: Fabricação vs Montagem Comercial */}
+                    <div className="flex border-b border-gray-200 dark:border-white/10 gap-6">
+                        <button
+                            onClick={() => {
+                                setActiveTab('MANUFACTURING');
+                                setExpandedRecipe(null);
+                            }}
+                            className={`pb-3 font-bold text-sm flex items-center gap-2 border-b-2 transition-all ${
+                                activeTab === 'MANUFACTURING'
+                                    ? 'border-primary text-gray-900 dark:text-white'
+                                    : 'border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                            }`}
+                        >
+                            <span className="material-symbols-outlined text-lg">science</span>
+                            Fórmulas de Fabricação (Mix, Base & Picolés)
+                            <span className="px-2 py-0.5 rounded-full text-xs bg-primary/20 text-primary font-mono">
+                                Produção
+                            </span>
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveTab('COMMERCIAL_ASSEMBLY');
+                                setExpandedRecipe(null);
+                            }}
+                            className={`pb-3 font-bold text-sm flex items-center gap-2 border-b-2 transition-all ${
+                                activeTab === 'COMMERCIAL_ASSEMBLY'
+                                    ? 'border-primary text-gray-900 dark:text-white'
+                                    : 'border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                            }`}
+                        >
+                            <span className="material-symbols-outlined text-lg">point_of_sale</span>
+                            Fichas de Venda / Montagem (Balcão)
+                            <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 font-mono">
+                                6 Fichas Ativas
+                            </span>
+                        </button>
                     </div>
 
-                    {/* Toolbar */}
-                    <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-3">
-                        <div className="flex items-center gap-2 relative">
+                    {/* Banner Informativo da Arquitetura */}
+                    {activeTab === 'MANUFACTURING' ? (
+                        <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/30 flex items-start gap-3 text-xs text-emerald-800 dark:text-emerald-300">
+                            <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-400 text-xl mt-0.5">precision_manufacturing</span>
+                            <div>
+                                <p className="font-bold text-sm">Fórmulas Físico-Químicas Elegíveis para Bateladas</p>
+                                <p className="mt-0.5 opacity-90">
+                                    Estas fórmulas definem a calda líquida produzida no pasteurizador ou maturador (com cálculo rigoroso de Gordura, Sólidos, ESDL, POD e PAC). <strong>Apenas estas fórmulas aparecem no seletor de Nova Ordem de Produção</strong>. Embalagens de serviço como casquinhas ou copos plásticos não entram aqui.
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/30 flex items-start gap-3 text-xs text-blue-800 dark:text-blue-300">
+                            <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-xl mt-0.5">info</span>
+                            <div>
+                                <p className="font-bold text-sm">Fichas de Montagem e Serviço Comercial</p>
+                                <p className="mt-0.5 opacity-90">
+                                    Estas fichas representam o produto unitário servido ao cliente final (ex: 1 Casquinha de Chocolate = 1 porção de gelato + 1 casquinha pequena). <strong>Elas não devem ser multiplicadas como batelada de fábrica</strong>, pois casquinhas e descartáveis pertencem à montagem de venda.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Toolbar & Busca */}
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                        <div className="flex items-center gap-2 relative flex-1 max-w-md">
                             <span className="material-symbols-outlined absolute left-3 text-gray-500">search</span>
                             <input
-                                className="pl-10 pr-4 py-2 w-64 border border-gray-300 dark:border-white/20 rounded-lg bg-white dark:bg-surface-dark text-gray-900 dark:text-white focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
-                                placeholder="Buscar receita..."
+                                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-white/20 rounded-xl bg-white dark:bg-surface-dark text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary outline-none"
+                                placeholder={activeTab === 'MANUFACTURING' ? 'Buscar fórmula de calda...' : 'Buscar ficha de produto comercial...'}
                                 type="text"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
-                        <button
-                            onClick={() => setIsModalOpen(true)}
-                            className="flex max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 bg-primary text-gray-900 dark:text-black gap-2 text-sm font-bold leading-normal tracking-[0.015em] min-w-0 px-4 hover:opacity-90 transition-opacity"
-                        >
-                            <span className="material-symbols-outlined fill">add</span>
-                            <span className="truncate">Nova Receita</span>
-                        </button>
+
+                        <div className="text-xs text-gray-500 font-mono">
+                            Exibindo {filteredRecipes.length} itens cadastrados
+                        </div>
                     </div>
 
-                    {/* Recipes List */}
-                    <div className="px-4 py-6 space-y-4">
+                    {/* Lista de Receitas / Fórmulas */}
+                    <div className="space-y-4">
                         {filteredRecipes.length === 0 ? (
-                            <div className="bg-white dark:bg-surface-dark rounded-xl p-8 text-center border border-gray-200 dark:border-white/10">
-                                <p className="text-gray-500 dark:text-gray-400">Nenhuma receita encontrada</p>
+                            <div className="bg-white dark:bg-surface-dark rounded-2xl p-12 text-center border border-gray-200 dark:border-white/10">
+                                <span className="material-symbols-outlined text-gray-400 text-5xl">folder_off</span>
+                                <p className="mt-3 text-gray-700 dark:text-gray-300 font-bold">Nenhum item cadastrado nesta categoria</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    {activeTab === 'MANUFACTURING'
+                                        ? 'Cadastre uma fórmula técnica de fabricação clicando no botão acima.'
+                                        : 'Nenhuma ficha comercial encontrada com o termo pesquisado.'}
+                                </p>
                             </div>
                         ) : (
                             filteredRecipes.map((recipe: any) => {
                                 const product = recipe.products || getProductById(recipe.product_id);
-                                const margin = product ? calculateMargin(recipe.total_cost || 0, product.price) : 0;
                                 const isExpanded = expandedRecipe === recipe.id;
+                                const isManufacturing = recipe.recipe_type === 'MANUFACTURING';
+                                const yieldKg = Number(recipe.yield || (isManufacturing ? 10 : 1));
+                                const costPerKg = isManufacturing && yieldKg > 0 ? (recipe.total_cost || 0) / yieldKg : 0;
+                                const margin = product ? calculateMargin(recipe.total_cost || 0, product.price) : 0;
 
                                 return (
                                     <div
                                         key={recipe.id}
-                                        className="bg-white dark:bg-surface-dark rounded-xl shadow-sm border border-gray-200 dark:border-white/10 overflow-hidden"
+                                        className="bg-white dark:bg-surface-dark rounded-2xl shadow-sm border border-gray-200 dark:border-white/10 overflow-hidden transition-all"
                                     >
                                         {/* Recipe Header */}
                                         <div
-                                            className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                                            className="p-5 cursor-pointer hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
                                             onClick={() => toggleExpand(recipe.id)}
                                         >
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-4 flex-1">
-                                                    {product && (
-                                                        <img
-                                                            src={product.image_url || product.image}
-                                                            alt={product.name}
-                                                            className="w-16 h-16 rounded-lg object-cover"
-                                                        />
-                                                    )}
-                                                    <div className="flex-1">
-                                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                                                            {product?.name || recipe.productName}
-                                                        </h3>
-                                                        <div className="flex items-center gap-4 mt-1 text-sm text-gray-600 dark:text-gray-400">
+                                            <div className="flex flex-wrap items-center justify-between gap-4">
+                                                <div className="flex items-center gap-4 flex-1 min-w-[280px]">
+                                                    <div className={`size-12 rounded-2xl flex items-center justify-center font-bold text-xl ${
+                                                        isManufacturing ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-primary/20 text-primary'
+                                                    }`}>
+                                                        <span className="material-symbols-outlined">
+                                                            {isManufacturing ? 'science' : 'icecream'}
+                                                        </span>
+                                                    </div>
+
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <h3 className="text-lg font-bold text-gray-900 dark:text-white font-display">
+                                                                {recipe.name || product?.name || 'Fórmula de Fabricação'}
+                                                            </h3>
+                                                            {isManufacturing ? (
+                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold uppercase tracking-wider">
+                                                                    {recipe.base_type === 'WATER' ? 'Base Água / Sorbet' : 'Base Láctea'}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 font-medium">
+                                                                    Ficha de Balcão (1 un)
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-gray-500">
+                                                            <span className="flex items-center gap-1 font-mono">
+                                                                <span className="material-symbols-outlined text-sm">scale</span>
+                                                                {isManufacturing ? `${yieldKg} kg rendimento` : '1 porção servida'}
+                                                            </span>
                                                             <span className="flex items-center gap-1">
-                                                                <span className="material-symbols-outlined text-base">restaurant</span>
-                                                                {recipe.recipe_items?.length || 0} ingredientes
+                                                                <span className="material-symbols-outlined text-sm">inventory_2</span>
+                                                                {recipe.recipe_items?.length || 0} insumos
                                                             </span>
                                                             {recipe.prep_time && (
                                                                 <span className="flex items-center gap-1">
-                                                                    <span className="material-symbols-outlined text-base">schedule</span>
+                                                                    <span className="material-symbols-outlined text-sm">schedule</span>
                                                                     {recipe.prep_time} min
                                                                 </span>
                                                             )}
@@ -161,30 +255,50 @@ const Recipes: React.FC = () => {
                                                     </div>
                                                 </div>
 
+                                                {/* Metrics / Indicators */}
                                                 <div className="flex items-center gap-6">
-                                                    <div className="text-right">
-                                                        <p className="text-sm text-gray-500 dark:text-gray-400">Custo</p>
-                                                        <p className="text-xl font-bold text-gray-900 dark:text-white">
-                                                            {formatCurrency(recipe.total_cost || 0)}
-                                                        </p>
-                                                    </div>
-                                                    {product && (
-                                                        <div className="text-right">
-                                                            <p className="text-sm text-gray-500 dark:text-gray-400">Preço</p>
-                                                            <p className="text-xl font-bold text-gray-900 dark:text-white">
-                                                                {formatCurrency(product.price)}
-                                                            </p>
-                                                        </div>
+                                                    {isManufacturing ? (
+                                                        <>
+                                                            <div className="text-right">
+                                                                <p className="text-[11px] text-gray-400 uppercase font-semibold">Custo da Batelada</p>
+                                                                <p className="text-base font-black text-gray-900 dark:text-white font-mono">
+                                                                    {formatCurrency(recipe.total_cost || 0)}
+                                                                </p>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <p className="text-[11px] text-primary uppercase font-semibold">Custo / kg</p>
+                                                                <p className="text-xl font-black text-primary font-mono">
+                                                                    {formatCurrency(costPerKg)}/kg
+                                                                </p>
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className="text-right">
+                                                                <p className="text-[11px] text-gray-400 uppercase font-semibold">Custo Servido</p>
+                                                                <p className="text-base font-black text-gray-900 dark:text-white font-mono">
+                                                                    {formatCurrency(recipe.total_cost || 0)}
+                                                                </p>
+                                                            </div>
+                                                            {product && (
+                                                                <div className="text-right">
+                                                                    <p className="text-[11px] text-gray-400 uppercase font-semibold">Preço Venda</p>
+                                                                    <p className="text-base font-black text-gray-900 dark:text-white font-mono">
+                                                                        {formatCurrency(product.price)}
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                            <div className="text-right">
+                                                                <p className="text-[11px] text-gray-400 uppercase font-semibold">Margem</p>
+                                                                <p className={`text-xl font-black font-mono ${
+                                                                    margin >= 50 ? 'text-emerald-500' : margin >= 30 ? 'text-amber-500' : 'text-red-500'
+                                                                }`}>
+                                                                    {margin.toFixed(1)}%
+                                                                </p>
+                                                            </div>
+                                                        </>
                                                     )}
-                                                    <div className="text-right">
-                                                        <p className="text-sm text-gray-500 dark:text-gray-400">Margem</p>
-                                                        <p className={`text-xl font-bold ${margin >= 50 ? 'text-green-600' :
-                                                            margin >= 30 ? 'text-yellow-600' :
-                                                                'text-red-600'
-                                                            }`}>
-                                                            {margin.toFixed(1)}%
-                                                        </p>
-                                                    </div>
+
                                                     <span className="material-symbols-outlined text-gray-400">
                                                         {isExpanded ? 'expand_less' : 'expand_more'}
                                                     </span>
@@ -194,50 +308,87 @@ const Recipes: React.FC = () => {
 
                                         {/* Recipe Details (Expanded) */}
                                         {isExpanded && (
-                                            <div className="border-t border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-4">
-                                                <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Ingredientes:</h4>
-                                                <div className="space-y-2">
-                                                    {(recipe.recipe_items || []).map((item: any, index: number) => (
-                                                        <div
-                                                            key={index}
-                                                            className="flex justify-between items-center p-3 bg-white dark:bg-surface-dark rounded-lg"
-                                                        >
-                                                            <div className="flex items-center gap-3">
-                                                                <span className="w-6 h-6 flex items-center justify-center bg-primary/20 text-gray-900 dark:text-white rounded-full text-xs font-bold">
-                                                                    {index + 1}
-                                                                </span>
-                                                                <span className="text-gray-900 dark:text-white font-medium">
-                                                                    {item.ingredients?.name || 'Ingrediente'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex items-center gap-6">
-                                                                <span className="text-gray-600 dark:text-gray-400">
-                                                                    {item.quantity} {item.unit}
-                                                                </span>
-                                                                <span className="text-gray-900 dark:text-white font-semibold min-w-[80px] text-right">
-                                                                    {formatCurrency(item.cost || 0)}
-                                                                </span>
-                                                            </div>
+                                            <div className="border-t border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/5 p-5 space-y-4">
+                                                {/* Se for fabricação, mostra parâmetros de formulação */}
+                                                {isManufacturing && (
+                                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 bg-white dark:bg-surface-dark rounded-xl border border-gray-200 dark:border-white/10 text-xs">
+                                                        <div>
+                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta Gordura</span>
+                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
+                                                                {recipe.target_fat_pct ? `${recipe.target_fat_pct}%` : '-'}
+                                                            </strong>
                                                         </div>
-                                                    ))}
+                                                        <div>
+                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta ESDL (Lácteo)</span>
+                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
+                                                                {recipe.target_msnf_pct ? `${recipe.target_msnf_pct}%` : '-'}
+                                                            </strong>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta POD (Doçura)</span>
+                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
+                                                                {recipe.target_pod || '-'}
+                                                            </strong>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400 block text-[10px] uppercase font-bold">Meta PAC (Anticongelante)</span>
+                                                            <strong className="text-sm font-mono text-gray-900 dark:text-white">
+                                                                {recipe.target_pac || '-'}
+                                                            </strong>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                <h4 className="font-bold text-xs uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                                                    {isManufacturing ? 'Composição do Mix da Batelada:' : 'Itens Consumidos no Atendimento / Venda:'}
+                                                </h4>
+
+                                                <div className="space-y-2">
+                                                    {(recipe.recipe_items || []).map((item: any, index: number) => {
+                                                        const isClosing = item.is_closing_ingredient;
+                                                        const ingName = item.ingredients?.name || 'Ingrediente';
+
+                                                        return (
+                                                            <div
+                                                                key={index}
+                                                                className={`flex justify-between items-center p-3 bg-white dark:bg-surface-dark rounded-xl border border-gray-100 dark:border-white/5 text-xs ${
+                                                                    isClosing ? 'border-primary/40 bg-primary/5' : ''
+                                                                }`}
+                                                            >
+                                                                <div className="flex items-center gap-3">
+                                                                    <span className="size-6 flex items-center justify-center bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-300 rounded-full font-bold text-[10px]">
+                                                                        {index + 1}
+                                                                    </span>
+                                                                    <div>
+                                                                        <span className="font-bold text-gray-900 dark:text-white">
+                                                                            {ingName}
+                                                                        </span>
+                                                                        {isClosing && (
+                                                                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-bold">
+                                                                                Fechamento de Peso
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="flex items-center gap-6">
+                                                                    <span className="font-mono text-gray-600 dark:text-gray-400 font-bold">
+                                                                        {formatPtBrStock(item.quantity, item.unit)}
+                                                                    </span>
+                                                                    <span className="text-gray-900 dark:text-white font-mono font-bold min-w-[80px] text-right">
+                                                                        {formatCurrency(item.cost || 0)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
 
-                                                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-white/10 flex justify-between items-center">
-                                                    <div className="flex gap-2">
-                                                        <button className="px-4 py-2 bg-white dark:bg-surface-dark text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition-colors border border-gray-300 dark:border-white/20">
-                                                            <span className="material-symbols-outlined text-base">edit</span>
-                                                        </button>
-                                                        <button className="px-4 py-2 bg-white dark:bg-surface-dark text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors border border-gray-300 dark:border-white/20">
-                                                            <span className="material-symbols-outlined text-base">delete</span>
-                                                        </button>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <p className="text-sm text-gray-500 dark:text-gray-400">Custo Total</p>
-                                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                                                            {formatCurrency(recipe.total_cost || (recipe.recipe_items || []).reduce((sum: number, item: any) => sum + (item.cost || 0), 0))}
-                                                        </p>
-                                                    </div>
-                                                </div>
+                                                {recipe.notes && (
+                                                    <p className="text-xs text-gray-500 italic pt-2">
+                                                        Observações: {recipe.notes}
+                                                    </p>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -248,11 +399,20 @@ const Recipes: React.FC = () => {
                 </div>
             </div>
 
-            {/* Recipe Modal */}
+            {/* Modal de Ficha Comercial Simples */}
             <RecipeModal
-                isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
+                isOpen={isCommercialModalOpen}
+                onClose={() => setIsCommercialModalOpen(false)}
                 onSave={addRecipe}
+            />
+
+            {/* Modal Especializada de Formulação Técnica */}
+            <ManufacturingFormulaModal
+                isOpen={isManufacturingModalOpen}
+                onClose={() => setIsManufacturingModalOpen(false)}
+                onSaved={refetch}
+                products={products}
+                onSaveFormula={addManufacturingFormula}
             />
         </Layout>
     );

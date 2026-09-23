@@ -91,5 +91,18 @@ export const auditService = {
     }
 
     return data;
+  },
+
+  /**
+   * Registra evento de segurança no log de auditoria
+   */
+  async logSecurityEvent(
+    action: string,
+    entity: string,
+    entityId: string,
+    details: Record<string, any>,
+    employeeId?: string | null
+  ) {
+    return this.recordAuditLog(action, entity, entityId, details, employeeId);
   }
 };

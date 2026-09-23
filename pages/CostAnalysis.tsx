@@ -1,338 +1,393 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { RECIPES, PRODUCTS } from '../constants';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { getRecipes } from '../services/recipeService';
+import { getProducts } from '../services/productService';
+import { calculatePricingMetrics } from '../services/formulationEngine';
+import { RECIPES as STATIC_RECIPES, PRODUCTS as STATIC_PRODUCTS } from '../constants';
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  Tooltip, 
+  ResponsiveContainer 
+} from 'recharts';
+
+interface ProductCostAnalysisItem {
+  id: string;
+  name: string;
+  category: string;
+  cost: number;
+  price: number;
+  multiplier: number;
+  markupPct: number;
+  margin: number;
+  profit: number;
+  hasRecipe: boolean;
+  recipeType?: string;
+  costPerKg?: number;
+}
 
 const CostAnalysis: React.FC = () => {
-    const [sortBy, setSortBy] = useState<'margin' | 'profit'>('margin');
+    const [sortBy, setSortBy] = useState<'margin' | 'profit' | 'multiplier'>('margin');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+    const [analysisItems, setAnalysisItems] = useState<ProductCostAnalysisItem[]>([]);
+    const [manufacturingFormulas, setManufacturingFormulas] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
 
     const formatCurrency = (value: number) => {
         return `R$ ${value.toFixed(2).replace('.', ',')}`;
     };
 
-    const calculateMargin = (cost: number, price: number) => {
-        if (price === 0) return 0;
-        return ((price - cost) / price) * 100;
+    useEffect(() => {
+        loadData();
+    }, []);
+
+    const loadData = async () => {
+        try {
+            setLoading(true);
+            const [dbRecipes, dbProducts] = await Promise.all([
+                getRecipes().catch(() => null),
+                getProducts().catch(() => null)
+            ]);
+
+            const recipes = dbRecipes && dbRecipes.length > 0 ? dbRecipes : STATIC_RECIPES;
+            const products = dbProducts && dbProducts.length > 0 ? dbProducts : STATIC_PRODUCTS;
+
+            // Fórmulas de Fabricação (Calda por kg)
+            const mfg = (recipes || []).filter((r: any) => r.recipe_type === 'MANUFACTURING');
+            setManufacturingFormulas(mfg);
+
+            // Análise de Produtos Comerciais (por unidade vendida)
+            const commercialRecipes = (recipes || []).filter((r: any) => r.recipe_type !== 'MANUFACTURING');
+
+            const analyzed: ProductCostAnalysisItem[] = (products || []).map((product: any) => {
+                const rec = commercialRecipes.find((r: any) => r.product_id === product.id || r.productId === product.id);
+                
+                // Se for picolé, adiciona custo de embalagem/palito (R$ 0,14) conforme planilha
+                const isPicole = product.name?.toLowerCase().includes('picolé') || product.category?.toLowerCase().includes('picolé');
+                const additionalCost = isPicole ? 0.14 : 0;
+
+                const baseCost = rec ? (Number(rec.total_cost || rec.totalCost || 0)) : (product.cost || 0);
+                const totalCost = baseCost + additionalCost;
+                const price = Number(product.price || 0);
+
+                const metrics = calculatePricingMetrics(totalCost, price);
+
+                return {
+                    id: product.id,
+                    name: product.name,
+                    category: product.category || 'Geral',
+                    cost: metrics.cost,
+                    price: metrics.price,
+                    multiplier: metrics.multiplier,
+                    markupPct: metrics.markupPct,
+                    margin: metrics.marginPct,
+                    profit: metrics.profit,
+                    hasRecipe: Boolean(rec),
+                    recipeType: rec?.recipe_type || 'COMMERCIAL_ASSEMBLY'
+                };
+            });
+
+            setAnalysisItems(analyzed);
+        } catch (err) {
+            console.error('Erro ao carregar análise de custos:', err);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    // Build product analysis data
-    const productAnalysis = RECIPES.map(recipe => {
-        const product = PRODUCTS.find(p => p.id === recipe.productId);
-        if (!product) return null;
-
-        const cost = recipe.totalCost || 0;
-        const price = product.price;
-        const margin = calculateMargin(cost, price);
-        const profit = price - cost;
-
-        return {
-            id: product.id,
-            name: product.name,
-            category: product.category,
-            cost,
-            price,
-            margin,
-            profit,
-            hasRecipe: true,
-        };
-    }).filter(Boolean);
-
-    // Add products without recipes
-    const productsWithoutRecipes = PRODUCTS.filter(
-        p => !RECIPES.find(r => r.productId === p.id)
-    ).map(product => ({
-        id: product.id,
-        name: product.name,
-        category: product.category,
-        cost: 0,
-        price: product.price,
-        margin: 0,
-        profit: 0,
-        hasRecipe: false,
-    }));
-
-    const allProducts = [...productAnalysis, ...productsWithoutRecipes];
-
     // Sort products
-    const sortedProducts = [...productAnalysis].sort((a, b) => {
-        const field = sortBy;
+    const sortedProducts = [...analysisItems].sort((a, b) => {
+        const field = sortBy === 'multiplier' ? 'multiplier' : sortBy;
         const multiplier = sortDirection === 'desc' ? -1 : 1;
         return (a[field] - b[field]) * multiplier;
     });
 
-    // Calculate statistics
-    const totalProducts = PRODUCTS.length;
-    const productsWithRecipe = RECIPES.length;
-    const productsWithoutRecipe = totalProducts - productsWithRecipe;
-    const averageMargin = productAnalysis.length > 0
-        ? productAnalysis.reduce((sum, p) => sum + p.margin, 0) / productAnalysis.length
+    const averageMargin = analysisItems.length > 0
+        ? analysisItems.reduce((sum, p) => sum + p.margin, 0) / analysisItems.length
         : 0;
 
-    const mostProfitable = productAnalysis.length > 0
-        ? productAnalysis.reduce((max, p) => p.profit > max.profit ? p : max)
+    const averageMultiplier = analysisItems.length > 0
+        ? analysisItems.reduce((sum, p) => sum + p.multiplier, 0) / analysisItems.length
+        : 0;
+
+    const mostProfitable = analysisItems.length > 0
+        ? analysisItems.reduce((max, p) => p.profit > max.profit ? p : max)
         : null;
 
-    const leastProfitable = productAnalysis.length > 0
-        ? productAnalysis.reduce((min, p) => p.profit < min.profit ? p : min)
+    const leastProfitable = analysisItems.length > 0
+        ? analysisItems.reduce((min, p) => p.profit < min.profit ? p : min)
         : null;
 
-    // Pie chart data for margin distribution
+    // Pie chart data
     const marginDistribution = [
         {
             name: 'Alta (>50%)',
-            value: productAnalysis.filter(p => p.margin >= 50).length,
+            value: analysisItems.filter(p => p.margin >= 50).length,
             color: '#10b981'
         },
         {
             name: 'Média (30-50%)',
-            value: productAnalysis.filter(p => p.margin >= 30 && p.margin < 50).length,
+            value: analysisItems.filter(p => p.margin >= 30 && p.margin < 50).length,
             color: '#f59e0b'
         },
         {
             name: 'Baixa (<30%)',
-            value: productAnalysis.filter(p => p.margin < 30).length,
+            value: analysisItems.filter(p => p.margin < 30).length,
             color: '#ef4444'
         },
     ].filter(item => item.value > 0);
 
-    // Bar chart data for top products
-    const topProducts = [...productAnalysis]
+    const topProducts = [...analysisItems]
         .sort((a, b) => b.profit - a.profit)
-        .slice(0, 5);
-
-    const bottomProducts = [...productAnalysis]
-        .sort((a, b) => a.margin - b.margin)
         .slice(0, 5);
 
     return (
         <Layout>
             <div className="p-6 lg:p-10 h-full overflow-y-auto">
-                <div className="max-w-7xl mx-auto">
+                <div className="max-w-7xl mx-auto space-y-8">
                     {/* Page Heading */}
-                    <div className="flex flex-wrap items-center justify-between gap-6 mb-10 transition-all duration-500">
-                        <div className="flex min-w-72 flex-col gap-2">
-                            <h1 className="text-4xl md:text-5xl font-black leading-tight tracking-tight text-gray-900 dark:text-white font-display">Análise de Custos</h1>
-                            <p className="text-lg font-normal leading-normal text-gray-500 dark:text-gray-400 font-body">
-                                Análise de rentabilidade e custos por produto.
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <h1 className="text-4xl md:text-5xl font-black text-gray-900 dark:text-white font-display tracking-tight">
+                                Análise de Custos & Precificação
+                            </h1>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                Análise financeira precisa discriminando <strong>Multiplicador</strong>, <strong>Markup</strong> e <strong>Margem Real</strong>, sem misturar bases de cálculo.
                             </p>
                         </div>
                     </div>
 
-                    {/* Summary Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-                        <div className="group relative bg-white/70 dark:bg-surface-dark/70 rounded-3xl p-6 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-glass hover:shadow-glass-hover transition-all duration-500 ease-fluid hover:-translate-y-2 overflow-hidden">
-                            <div className="absolute -inset-4 bg-gradient-to-br from-primary/5 to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10 rounded-3xl blur-xl"></div>
-                            <p className="text-sm font-semibold leading-normal text-gray-500 dark:text-gray-400 font-body tracking-wide uppercase">Total de Produtos</p>
-                            <p className="tracking-tight text-4xl font-black leading-tight text-gray-900 dark:text-white font-display my-1">{totalProducts}</p>
-                            <p className="text-sm font-medium text-gray-400 mt-auto">{productsWithRecipe} com receita</p>
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="bg-white dark:bg-surface-dark rounded-2xl p-5 border border-gray-200 dark:border-white/10 shadow-sm">
+                            <p className="text-xs font-semibold text-gray-400 uppercase">Margem Média Real</p>
+                            <p className="text-3xl font-black text-gray-900 dark:text-white font-mono mt-1">
+                                {averageMargin.toFixed(1)}%
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1">Lucro sobre preço de venda</p>
                         </div>
-                        <div className="group relative bg-white/70 dark:bg-surface-dark/70 rounded-3xl p-6 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-glass hover:shadow-glass-hover transition-all duration-500 ease-fluid hover:-translate-y-2 overflow-hidden">
-                            <div className="absolute -inset-4 bg-gradient-to-br from-primary/5 to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10 rounded-3xl blur-xl"></div>
-                            <p className="text-sm font-semibold leading-normal text-gray-500 dark:text-gray-400 font-body tracking-wide uppercase">Margem Média</p>
-                            <p className="tracking-tight text-4xl font-black leading-tight text-green-600 dark:text-green-500 font-display my-1">{averageMargin.toFixed(1)}%</p>
+
+                        <div className="bg-white dark:bg-surface-dark rounded-2xl p-5 border border-gray-200 dark:border-white/10 shadow-sm">
+                            <p className="text-xs font-semibold text-primary uppercase">Multiplicador Médio</p>
+                            <p className="text-3xl font-black text-primary font-mono mt-1">
+                                {averageMultiplier.toFixed(2)}x
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1">Fator Preço / Custo</p>
                         </div>
-                        <div className="group relative bg-white/70 dark:bg-surface-dark/70 rounded-3xl p-6 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-glass hover:shadow-glass-hover transition-all duration-500 ease-fluid hover:-translate-y-2 overflow-hidden">
-                            <div className="absolute -inset-4 bg-gradient-to-br from-primary/5 to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10 rounded-3xl blur-xl"></div>
-                            <p className="text-sm font-semibold leading-normal text-gray-500 dark:text-gray-400 font-body tracking-wide uppercase">Mais Rentável</p>
-                            <p className="tracking-tight text-2xl font-bold leading-tight text-gray-900 dark:text-white font-display my-1 truncate">
+
+                        <div className="bg-white dark:bg-surface-dark rounded-2xl p-5 border border-gray-200 dark:border-white/10 shadow-sm">
+                            <p className="text-xs font-semibold text-emerald-500 uppercase">Maior Lucro Unitário</p>
+                            <p className="text-xl font-bold text-gray-900 dark:text-white truncate mt-1">
                                 {mostProfitable?.name || '-'}
                             </p>
-                            <p className="text-sm font-bold text-green-600 mt-auto">
-                                {mostProfitable ? `${mostProfitable.margin.toFixed(1)}%` : ''}
+                            <p className="text-xs font-mono font-bold text-emerald-600 mt-0.5">
+                                +{formatCurrency(mostProfitable?.profit || 0)}/un ({mostProfitable?.margin.toFixed(1)}%)
                             </p>
                         </div>
-                        <div className="group relative bg-white/70 dark:bg-surface-dark/70 rounded-3xl p-6 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-glass hover:shadow-glass-hover transition-all duration-500 ease-fluid hover:-translate-y-2 overflow-hidden">
-                            <div className="absolute -inset-4 bg-gradient-to-br from-primary/5 to-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10 rounded-3xl blur-xl"></div>
-                            <p className="text-sm font-semibold leading-normal text-gray-500 dark:text-gray-400 font-body tracking-wide uppercase">Menos Rentável</p>
-                            <p className="tracking-tight text-2xl font-bold leading-tight text-gray-900 dark:text-white font-display my-1 truncate">
+
+                        <div className="bg-white dark:bg-surface-dark rounded-2xl p-5 border border-gray-200 dark:border-white/10 shadow-sm">
+                            <p className="text-xs font-semibold text-amber-500 uppercase">Menor Margem</p>
+                            <p className="text-xl font-bold text-gray-900 dark:text-white truncate mt-1">
                                 {leastProfitable?.name || '-'}
                             </p>
-                            <p className="text-sm font-bold text-red-600 mt-auto">
-                                {leastProfitable ? `${leastProfitable.margin.toFixed(1)}%` : ''}
+                            <p className="text-xs font-mono font-bold text-amber-600 mt-0.5">
+                                {leastProfitable?.margin.toFixed(1)}% ({formatCurrency(leastProfitable?.profit || 0)})
                             </p>
                         </div>
                     </div>
 
-                    {/* Charts */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
-                        {/* Pie Chart - Margin Distribution */}
-                        <div className="bg-white/70 dark:bg-surface-dark/70 rounded-3xl p-8 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-glass hover:shadow-glass-hover transition-all duration-500 group">
-                            <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-xl font-bold leading-normal text-gray-900 dark:text-gray-50 font-display tracking-tight">Distribuição de Margem</h3>
-                                <span className="material-symbols-outlined text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">pie_chart</span>
+                    {/* Seção Especial: Custos de Formulação de Fábrica (Custo por kg do Mix) */}
+                    {manufacturingFormulas.length > 0 && (
+                        <div className="p-6 rounded-3xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/30 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-base font-black font-display text-emerald-950 dark:text-emerald-200 flex items-center gap-2">
+                                    <span className="material-symbols-outlined text-emerald-600">science</span>
+                                    Custo de Fabricação por kg de Calda (Mix Base)
+                                </h3>
+                                <span className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                                    Base da batelada sem embalagens de atendimento
+                                </span>
                             </div>
-                            {marginDistribution.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={260}>
-                                    <PieChart>
-                                        <Pie
-                                            data={marginDistribution}
-                                            cx="50%"
-                                            cy="50%"
-                                            labelLine={false}
-                                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                            outerRadius={90}
-                                            innerRadius={60}
-                                            fill="#8884d8"
-                                            dataKey="value"
-                                            paddingAngle={5}
-                                        >
-                                            {marginDistribution.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={entry.color} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip
-                                            contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', color: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}
-                                            itemStyle={{ color: '#fff', fontWeight: 600, fontFamily: 'Nunito Sans' }}
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <p className="text-gray-500 dark:text-gray-400 text-center py-12 font-medium">
-                                    Sem dados de margem disponíveis
-                                </p>
-                            )}
-                        </div>
 
-                        {/* Bar Chart - Top Products */}
-                        <div className="bg-white/70 dark:bg-surface-dark/70 rounded-3xl p-8 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-glass hover:shadow-glass-hover transition-all duration-500 group">
-                            <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-xl font-bold leading-normal text-gray-900 dark:text-gray-50 font-display tracking-tight">Top 5 - Lucro Unitário</h3>
-                                <span className="material-symbols-outlined text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">bar_chart</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                {manufacturingFormulas.map((f: any) => {
+                                    const yieldKg = Number(f.yield || 10);
+                                    const costKg = yieldKg > 0 ? Number(f.total_cost || 0) / yieldKg : 0;
+
+                                    return (
+                                        <div key={f.id} className="p-4 rounded-2xl bg-white dark:bg-surface-dark border border-emerald-100 dark:border-emerald-900/40 shadow-xs">
+                                            <p className="font-bold text-xs text-gray-900 dark:text-white">{f.name}</p>
+                                            <div className="flex items-baseline justify-between mt-2">
+                                                <span className="text-2xl font-black text-emerald-600 font-mono">
+                                                    {formatCurrency(costKg)}/kg
+                                                </span>
+                                                <span className="text-[11px] text-gray-400 font-mono">
+                                                    Batelada {yieldKg} kg
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                            {topProducts.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={260}>
-                                    <BarChart data={topProducts} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <XAxis dataKey="name" stroke="#9ca3af" fontSize={13} fontFamily="Nunito Sans" axisLine={false} tickLine={false} dy={10} />
-                                        <YAxis stroke="#9ca3af" fontSize={13} fontFamily="Nunito Sans" axisLine={false} tickLine={false} />
-                                        <Tooltip
-                                            contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', color: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}
-                                            labelStyle={{ color: '#fff', fontWeight: 600, fontFamily: 'Nunito Sans' }}
-                                            cursor={{ fill: 'rgba(16, 185, 129, 0.05)', radius: [8, 8, 8, 8] }}
-                                            formatter={(value: number) => formatCurrency(value)}
-                                        />
-                                        <Bar dataKey="profit" fill="url(#colorProfit)" radius={[6, 6, 6, 6]} barSize={40} />
-                                        <defs>
-                                            <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor="#34d399" stopOpacity={1} />
-                                                <stop offset="100%" stopColor="#10b981" stopOpacity={0.8} />
-                                            </linearGradient>
-                                        </defs>
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <p className="text-gray-500 dark:text-gray-400 text-center py-12 font-medium">
-                                    Sem dados disponíveis
-                                </p>
-                            )}
                         </div>
-                    </div>
+                    )}
 
-                    {/* Rentability Table */}
-                    <div className="px-4 py-6 mb-10">
-                        <div className="bg-white/70 dark:bg-surface-dark/70 rounded-3xl p-6 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-glass transition-all duration-500 overflow-hidden group">
-                            <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-xl font-bold leading-normal text-gray-900 dark:text-gray-50 font-display tracking-tight">Rentabilidade</h3>
-                                <div className="flex gap-3">
-                                    <div className="relative">
-                                        <select
-                                            value={sortBy}
-                                            onChange={(e) => setSortBy(e.target.value as 'margin' | 'profit')}
-                                            className="appearance-none pl-4 pr-10 py-2.5 rounded-xl border border-gray-200/50 dark:border-white/10 bg-white/50 dark:bg-black/20 text-gray-900 dark:text-white text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer backdrop-blur-sm"
-                                        >
-                                            <option value="margin">Ordenar por Margem</option>
-                                            <option value="profit">Ordenar por Lucro</option>
-                                        </select>
-                                        <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">expand_content</span>
-                                    </div>
-                                    <button
-                                        onClick={() => setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc')}
-                                        className="w-11 h-11 flex items-center justify-center rounded-xl border border-gray-200/50 dark:border-white/10 bg-white/50 dark:bg-black/20 text-gray-900 dark:text-white hover:bg-white/80 dark:hover:bg-white/10 transition-all cursor-pointer backdrop-blur-sm shadow-sm hover:shadow-md active:scale-95"
+                    {/* Gráficos de Margem e Lucro */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Distribuição por Faixa de Margem */}
+                        <div className="bg-white dark:bg-surface-dark rounded-3xl p-6 border border-gray-200 dark:border-white/10 shadow-sm">
+                            <h3 className="text-base font-bold text-gray-900 dark:text-white font-display mb-4">
+                                Distribuição por Faixas de Margem Real
+                            </h3>
+                            <ResponsiveContainer width="100%" height={240}>
+                                <PieChart>
+                                    <Pie
+                                        data={marginDistribution}
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={60}
+                                        outerRadius={90}
+                                        paddingAngle={4}
+                                        dataKey="value"
                                     >
-                                        <span className="material-symbols-outlined text-xl transition-transform duration-300">
-                                            {sortDirection === 'desc' ? 'arrow_downward' : 'arrow_upward'}
-                                        </span>
-                                    </button>
-                                </div>
-                            </div>
-                            <div className="overflow-x-auto -mx-6 px-6">
-                                <table className="w-full text-left border-separate border-spacing-y-2">
-                                    <thead className="text-xs uppercase font-bold tracking-wider text-gray-400 dark:text-gray-500">
-                                        <tr>
-                                            <th className="px-4 py-3">Produto</th>
-                                            <th className="px-4 py-3">Categoria</th>
-                                            <th className="px-4 py-3">Custo</th>
-                                            <th className="px-4 py-3">Preço</th>
-                                            <th className="px-4 py-3">Margem</th>
-                                            <th className="px-4 py-3 text-right">Lucro Unit.</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {sortedProducts.map(product => (
-                                            <tr key={product.id} className="group bg-white/40 dark:bg-white/5 hover:bg-white/80 dark:hover:bg-white/10 transition-colors backdrop-blur-sm rounded-xl">
-                                                <td className="px-4 py-4 text-gray-900 dark:text-white font-bold rounded-l-xl">{product.name}</td>
-                                                <td className="px-4 py-4 text-sm font-semibold text-gray-500 dark:text-gray-400">{product.category}</td>
-                                                <td className="px-4 py-4 text-gray-700 dark:text-gray-300 font-semibold">
-                                                    {formatCurrency(product.cost)}
-                                                </td>
-                                                <td className="px-4 py-4 text-gray-700 dark:text-gray-300 font-semibold">
-                                                    {formatCurrency(product.price)}
-                                                </td>
-                                                <td className="px-4 py-4">
-                                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold border ${product.margin >= 50 ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800/30' :
-                                                        product.margin >= 30 ? 'bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800/30' :
-                                                            'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800/30'
-                                                        }`}>
-                                                        {product.margin.toFixed(1)}%
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-4 text-gray-900 dark:text-white font-black text-right rounded-r-xl">
-                                                    {formatCurrency(product.profit)}
-                                                </td>
-                                            </tr>
+                                        {marginDistribution.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.color} />
                                         ))}
-                                    </tbody>
-                                </table>
+                                    </Pie>
+                                    <Tooltip
+                                        formatter={(val: number) => [`${val} produtos`, 'Total']}
+                                        contentStyle={{ backgroundColor: '#18181b', borderRadius: '12px', border: 'none', color: '#fff' }}
+                                    />
+                                </PieChart>
+                            </ResponsiveContainer>
+                            <div className="flex justify-center gap-6 mt-2 text-xs">
+                                {marginDistribution.map(item => (
+                                    <div key={item.name} className="flex items-center gap-2">
+                                        <span className="size-3 rounded-full" style={{ backgroundColor: item.color }} />
+                                        <span className="text-gray-600 dark:text-gray-400 font-medium">{item.name}</span>
+                                    </div>
+                                ))}
                             </div>
+                        </div>
+
+                        {/* Top 5 - Lucro Unitário */}
+                        <div className="bg-white dark:bg-surface-dark rounded-3xl p-6 border border-gray-200 dark:border-white/10 shadow-sm">
+                            <h3 className="text-base font-bold text-gray-900 dark:text-white font-display mb-4">
+                                Top 5 - Maior Lucro Unitário em R$
+                            </h3>
+                            <ResponsiveContainer width="100%" height={260}>
+                                <BarChart data={topProducts} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                                    <XAxis dataKey="name" stroke="#9ca3af" fontSize={11} axisLine={false} tickLine={false} />
+                                    <YAxis stroke="#9ca3af" fontSize={11} axisLine={false} tickLine={false} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#18181b', borderRadius: '12px', border: 'none', color: '#fff' }}
+                                        formatter={(value: number) => formatCurrency(value)}
+                                    />
+                                    <Bar dataKey="profit" fill="#10b981" radius={[8, 8, 0, 0]} barSize={36} />
+                                </BarChart>
+                            </ResponsiveContainer>
                         </div>
                     </div>
 
-                    {/* Alerts/Suggestions */}
-                    {productsWithoutRecipe > 0 && (
-                        <div className="px-4 py-4">
-                            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/30 rounded-xl p-4">
-                                <div className="flex gap-3">
-                                    <span className="material-symbols-outlined text-yellow-600 dark:text-yellow-400">warning</span>
-                                    <div>
-                                        <h4 className="font-semibold text-yellow-900 dark:text-yellow-300">
-                                            Produtos sem receita cadastrada
-                                        </h4>
-                                        <p className="text-sm text-yellow-800 dark:text-yellow-400 mt-1">
-                                            Existem {productsWithoutRecipe} produtos sem ficha técnica. Cadastre as receitas para calcular custos e margens.
-                                        </p>
-                                    </div>
-                                </div>
+                    {/* Tabela Comparativa Rigorosa: Custo, Preço, Multiplicador, Markup e Margem */}
+                    <div className="bg-white dark:bg-surface-dark rounded-3xl p-6 border border-gray-200 dark:border-white/10 shadow-sm space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <h3 className="text-xl font-black text-gray-900 dark:text-white font-display">
+                                    Rentabilidade & Precificação por Produto Vendido
+                                </h3>
+                                <p className="text-xs text-gray-500">
+                                    Multiplicador (Preço/Custo) vs Markup (Adicional s/ Custo) vs Margem (Lucro s/ Preço)
+                                </p>
                             </div>
-                        </div>
-                    )}
 
-                    {bottomProducts.some(p => p.margin < 30) && (
-                        <div className="px-4 py-4">
-                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/30 rounded-xl p-4">
-                                <div className="flex gap-3">
-                                    <span className="material-symbols-outlined text-red-600 dark:text-red-400">error</span>
-                                    <div>
-                                        <h4 className="font-semibold text-red-900 dark:text-red-300">
-                                            Produtos com margem baixa
-                                        </h4>
-                                        <p className="text-sm text-red-800 dark:text-red-400 mt-1">
-                                            Os seguintes produtos têm margem abaixo de 30%: {bottomProducts.filter(p => p.margin < 30).map(p => p.name).join(', ')}
-                                        </p>
-                                    </div>
-                                </div>
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={sortBy}
+                                    onChange={(e) => setSortBy(e.target.value as any)}
+                                    className="px-3 py-2 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 text-xs font-semibold text-gray-800 dark:text-gray-200 outline-none"
+                                >
+                                    <option value="margin">Ordenar por Margem (%)</option>
+                                    <option value="multiplier">Ordenar por Multiplicador (x)</option>
+                                    <option value="profit">Ordenar por Lucro (R$)</option>
+                                </select>
+
+                                <button
+                                    onClick={() => setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc')}
+                                    className="size-9 rounded-xl border border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5"
+                                >
+                                    <span className="material-symbols-outlined text-lg">
+                                        {sortDirection === 'desc' ? 'arrow_downward' : 'arrow_upward'}
+                                    </span>
+                                </button>
                             </div>
                         </div>
-                    )}
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-gray-50 dark:bg-black/30 border-b border-gray-200 dark:border-white/10 text-xs font-bold text-gray-400 uppercase">
+                                    <tr>
+                                        <th className="py-3 px-4">Produto</th>
+                                        <th className="py-3 px-4">Categoria</th>
+                                        <th className="py-3 px-4 text-right">Custo Unit.</th>
+                                        <th className="py-3 px-4 text-right">Preço Venda</th>
+                                        <th className="py-3 px-4 text-center">Multiplicador</th>
+                                        <th className="py-3 px-4 text-right">Markup (%)</th>
+                                        <th className="py-3 px-4 text-right">Margem Real (%)</th>
+                                        <th className="py-3 px-4 text-right">Lucro Unitário</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-white/5 font-medium">
+                                    {sortedProducts.map(item => (
+                                        <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-white/5">
+                                            <td className="py-3 px-4 font-bold text-gray-900 dark:text-white">
+                                                {item.name}
+                                            </td>
+                                            <td className="py-3 px-4 text-xs text-gray-500">
+                                                {item.category}
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono text-gray-600 dark:text-gray-300">
+                                                {formatCurrency(item.cost)}
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono font-bold text-gray-900 dark:text-white">
+                                                {formatCurrency(item.price)}
+                                            </td>
+                                            {/* Multiplicador inequívoco */}
+                                            <td className="py-3 px-4 text-center">
+                                                <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-mono font-bold text-xs">
+                                                    {item.multiplier.toFixed(2)}x
+                                                </span>
+                                            </td>
+                                            {/* Markup */}
+                                            <td className="py-3 px-4 text-right font-mono text-gray-600 dark:text-gray-400 text-xs">
+                                                +{item.markupPct.toFixed(1)}%
+                                            </td>
+                                            {/* Margem de Lucro Real */}
+                                            <td className="py-3 px-4 text-right">
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold ${
+                                                    item.margin >= 50
+                                                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                                                        : item.margin >= 30
+                                                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                                                        : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400'
+                                                }`}>
+                                                    {item.margin.toFixed(1)}%
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono font-black text-gray-900 dark:text-white">
+                                                {formatCurrency(item.profit)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
         </Layout>

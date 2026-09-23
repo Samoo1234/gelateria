@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { productionService } from '../services/productionService';
 import { useAuth } from '../contexts/AuthContext';
+import { formatPtBrStock } from '../services/formulationEngine';
 
 interface NewBatchModalProps {
   isOpen: boolean;
@@ -133,11 +134,11 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
               </label>
               {fetchingRecipes ? (
                 <div className="h-11 flex items-center text-xs text-gray-500">
-                  Carregando receitas...
+                  Carregando fórmulas elegíveis...
                 </div>
               ) : recipes.length === 0 ? (
                 <div className="h-11 flex items-center text-xs text-amber-500">
-                  Nenhuma receita cadastrada. Cadastre em /recipes.
+                  Nenhuma fórmula técnica de fabricação cadastrada. Cadastre em /recipes.
                 </div>
               ) : (
                 <select
@@ -145,13 +146,13 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
                   onChange={(e) => {
                     setSelectedRecipeId(e.target.value);
                     const r = recipes.find((x) => x.id === e.target.value);
-                    if (r) setPlannedQuantity(Number(r.yield || 5));
+                    if (r) setPlannedQuantity(Number(r.yield || 10));
                   }}
                   className="w-full h-11 px-3 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white font-medium focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
                 >
                   {recipes.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.products?.name || 'Receita sem nome'} ({r.yield || 1} kg padrão)
+                      {r.displayName || r.name || r.products?.name || 'Fórmula sem nome'} ({r.yield || 10} kg padrão)
                     </option>
                   ))}
                 </select>
@@ -216,18 +217,18 @@ const NewBatchModal: React.FC<NewBatchModalProps> = ({ isOpen, onClose, onCreate
                           {item.ingredients?.name || 'Ingrediente'}
                         </p>
                         <p className="text-[10px] text-gray-400">
-                          Disponível: {item.current} {item.unit}
+                          Disponível: {formatPtBrStock(item.current, item.unit)}
                         </p>
                       </div>
                     </div>
 
                     <div className="text-right">
                       <p className="font-mono font-bold text-gray-900 dark:text-white">
-                        {item.required} {item.unit}
+                        {formatPtBrStock(item.required, item.unit)}
                       </p>
                       {!item.hasStock && (
                         <p className="text-[10px] font-semibold text-red-500">
-                          Falta {(item.required - item.current).toFixed(3)} {item.unit}
+                          Falta {formatPtBrStock(item.required - item.current, item.unit)}
                         </p>
                       )}
                     </div>
